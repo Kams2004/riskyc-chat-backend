@@ -1,0 +1,17 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: media-service
+
+riskyc:
+  minio:
+    endpoint: ${RISKYC_MINIO_ENDPOINT:http://localhost:9000}
+    # Baked into presigned URLs — must be reachable from the mobile client,
+    # not just from inside the Docker network. Override with your machine's
+    # LAN IP when testing on a physical device.
+    public-endpoint: ${RISKYC_MINIO_PUBLIC_ENDPOINT:http://localhost:9000}
+    access-key: riskyc
+    secret-key: riskyc-secret
+    bucket: riskyc-media

@@ -1,0 +1,15 @@
+# local env files (.env.example stays tracked — it has no real secrets)
+.env
+.env*.local
+
+# Maven build output
+target/
+*.class
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# macOS
+.DS_Store

@@ -1,0 +1,22 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: messaging-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/riskyc
+    username: riskyc
+    password: riskyc
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+riskyc:
+  jwt:
+    secret: ${RISKYC_JWT_SECRET:ZmFrZS1kZXYtc2VjcmV0LWRvLW5vdC11c2UtaW4tcHJvZC1wbGVhc2UtY2hhbmdlLW1l}

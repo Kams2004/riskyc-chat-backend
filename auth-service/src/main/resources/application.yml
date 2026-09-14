@@ -1,0 +1,33 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: auth-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/riskyc
+    username: riskyc
+    password: riskyc
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+  mail:
+    host: ${RISKYC_MAIL_HOST:smtp.gmail.com}
+    port: ${RISKYC_MAIL_PORT:587}
+    username: ${RISKYC_MAIL_USERNAME:}
+    password: ${RISKYC_MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
+riskyc:
+  jwt:
+    # Local-dev-only secret. Provide via env var / secret manager in real deployments.
+    secret: ${RISKYC_JWT_SECRET:ZmFrZS1kZXYtc2VjcmV0LWRvLW5vdC11c2UtaW4tcHJvZC1wbGVhc2UtY2hhbmdlLW1l}
+  mail:
+    # The address OTP emails are sent from — usually the same as spring.mail.username.
+    from: ${RISKYC_MAIL_FROM:${RISKYC_MAIL_USERNAME:}}
