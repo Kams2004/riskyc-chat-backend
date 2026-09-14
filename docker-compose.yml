@@ -6,8 +6,10 @@
 # to reach, or be reached by, another stack's containers. The only possible
 # collision is a host port already bound by something else, which fails the
 # affected container's startup loudly (address already in use) rather than
-# causing any cross-talk; every port below is overridable via .env if that
-# happens (see .env.example).
+# causing any cross-talk. Default ports below are already shifted off
+# whatever `docker ps` showed taken on the target VPS (riskyc-backend,
+# riskyc-frontend, nguon-app, jitsi) — see .env.example for the exact list
+# and how to override further if a different host needs it.
 services:
   postgres:
     image: postgres:16-alpine
@@ -20,7 +22,9 @@ services:
     # 127.0.0.1 still lets you `psql` from the host itself (or an SSH
     # tunnel) without exposing the DB to the internet.
     ports:
-      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
+      # Default host port shifted off 5432: the VPS this ships to already has
+      # another Postgres container bound to 0.0.0.0:5432.
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
@@ -36,11 +40,13 @@ services:
       MINIO_ROOT_USER: riskyc
       MINIO_ROOT_PASSWORD: riskyc-secret
     ports:
-      # 9000 (S3 API) stays public — media-service hands out presigned URLs
+      # 9000/9001 shifted off their usual defaults: the VPS this ships to
+      # already has another MinIO container bound to those exact host ports.
+      # API (9010) stays public — media-service hands out presigned URLs
       # against it directly, so the mobile client must be able to reach it.
-      # 9001 (admin console/root credentials) has no reason to be public.
-      - "${MINIO_API_HOST_PORT:-9000}:9000"
-      - "127.0.0.1:${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
+      # Console (9011) has no reason to be public.
+      - "${MINIO_API_HOST_PORT:-9010}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_HOST_PORT:-9011}:9001"
     volumes:
       - minio-data:/data
 
@@ -52,7 +58,8 @@ services:
       context: .
       dockerfile: auth-service/Dockerfile
     ports:
-      - "${AUTH_SERVICE_HOST_PORT:-8081}:8081"
+      # 8081 shifted to 8091: already bound by another container on this VPS.
+      - "${AUTH_SERVICE_HOST_PORT:-8091}:8081"
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/riskyc
       RISKYC_MAIL_HOST: ${RISKYC_MAIL_HOST:-smtp.gmail.com}
@@ -68,7 +75,8 @@ services:
       context: .
       dockerfile: messaging-service/Dockerfile
     ports:
-      - "${MESSAGING_SERVICE_HOST_PORT:-8082}:8082"
+      # 8082 shifted to 8092: already bound by another container on this VPS.
+      - "${MESSAGING_SERVICE_HOST_PORT:-8092}:8082"
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/riskyc
       SPRING_DATA_REDIS_HOST: redis
