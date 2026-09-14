@@ -6,12 +6,14 @@ import com.riskyc.messaging.dto.CallIceCandidate;
 import com.riskyc.messaging.dto.CallInvite;
 import com.riskyc.messaging.entity.Call;
 import com.riskyc.messaging.repository.CallRepository;
+import com.riskyc.messaging.service.PushNotificationService;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 
 import java.security.Principal;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -31,10 +33,13 @@ public class CallController {
 
     private final CallRepository callRepository;
     private final SimpMessagingTemplate messagingTemplate;
+    private final PushNotificationService pushNotificationService;
 
-    public CallController(CallRepository callRepository, SimpMessagingTemplate messagingTemplate) {
+    public CallController(CallRepository callRepository, SimpMessagingTemplate messagingTemplate,
+                           PushNotificationService pushNotificationService) {
         this.callRepository = callRepository;
         this.messagingTemplate = messagingTemplate;
+        this.pushNotificationService = pushNotificationService;
     }
 
     @MessageMapping("/call.invite")
@@ -49,6 +54,12 @@ public class CallController {
 
         CallInvite outbound = new CallInvite(callId, fromUserId, inbound.toUserId(), inbound.type(), inbound.sdpOffer());
         messagingTemplate.convertAndSendToUser(inbound.toUserId(), "/queue/calls", outbound, headersFor("invite"));
+
+        Map<String, Object> pushData = new LinkedHashMap<>();
+        pushData.put("type", "call");
+        pushData.put("callId", callId);
+        String title = "VIDEO".equals(inbound.type()) ? "Incoming video call" : "Incoming voice call";
+        pushNotificationService.sendToUser(inbound.toUserId(), title, "RiskyC Chat", "calls", pushData);
     }
 
     @MessageMapping("/call.answer")

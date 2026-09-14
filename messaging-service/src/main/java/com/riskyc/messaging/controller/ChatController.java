@@ -9,19 +9,24 @@ import com.riskyc.messaging.dto.MessageMutation;
 import com.riskyc.messaging.dto.MessageStatusUpdate;
 import com.riskyc.messaging.dto.TypingIndicator;
 import com.riskyc.messaging.dto.TypingUpdate;
+import com.riskyc.messaging.entity.GroupConversation;
 import com.riskyc.messaging.entity.GroupMember;
 import com.riskyc.messaging.entity.Message;
 import com.riskyc.messaging.entity.MessageReceipt;
+import com.riskyc.messaging.repository.GroupConversationRepository;
 import com.riskyc.messaging.repository.GroupMemberRepository;
 import com.riskyc.messaging.repository.MessageReceiptRepository;
 import com.riskyc.messaging.repository.MessageRepository;
+import com.riskyc.messaging.service.PushNotificationService;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 
 import java.security.Principal;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -38,15 +43,20 @@ public class ChatController {
 
     private final MessageRepository messageRepository;
     private final GroupMemberRepository groupMemberRepository;
+    private final GroupConversationRepository groupConversationRepository;
     private final MessageReceiptRepository receiptRepository;
     private final SimpMessagingTemplate messagingTemplate;
+    private final PushNotificationService pushNotificationService;
 
     public ChatController(MessageRepository messageRepository, GroupMemberRepository groupMemberRepository,
-                           MessageReceiptRepository receiptRepository, SimpMessagingTemplate messagingTemplate) {
+                           GroupConversationRepository groupConversationRepository, MessageReceiptRepository receiptRepository,
+                           SimpMessagingTemplate messagingTemplate, PushNotificationService pushNotificationService) {
         this.messageRepository = messageRepository;
         this.groupMemberRepository = groupMemberRepository;
+        this.groupConversationRepository = groupConversationRepository;
         this.receiptRepository = receiptRepository;
         this.messagingTemplate = messagingTemplate;
+        this.pushNotificationService = pushNotificationService;
     }
 
     @MessageMapping("/chat.send")
@@ -74,13 +84,48 @@ public class ChatController {
                 inbound.mediaFileName(), inbound.mediaDurationMs(), false, false, inbound.groupId());
         messagingTemplate.convertAndSend("/topic/conversation." + inbound.conversationId(), outbound);
 
+        String previewBody = previewFor(inbound.mediaType(), inbound.ciphertext());
+        Map<String, Object> pushData = new LinkedHashMap<>();
+        pushData.put("type", "message");
+        pushData.put("conversationId", inbound.conversationId());
+        pushData.put("senderId", inbound.senderId());
         if (isGroup) {
+            pushData.put("groupId", inbound.groupId());
+        }
+
+        if (isGroup) {
+            String groupName = groupConversationRepository.findById(inbound.groupId())
+                    .map(GroupConversation::getName).orElse("Group chat");
             for (String memberId : otherMemberIds(inbound.groupId(), inbound.senderId())) {
                 messagingTemplate.convertAndSendToUser(memberId, "/queue/messages", outbound);
+                pushNotificationService.sendToUser(memberId, groupName, previewBody, "messages", pushData);
             }
         } else {
             messagingTemplate.convertAndSendToUser(inbound.recipientId(), "/queue/messages", outbound);
+            pushNotificationService.sendToUser(inbound.recipientId(), "RiskyC Chat", previewBody, "messages", pushData);
         }
+    }
+
+    /**
+     * No sender-name lookup here on purpose: that would mean an HTTP call
+     * from messaging-service into auth-service on every single message
+     * send, just for notification cosmetics. Kept simple for now — see
+     * backend/README.md's other documented MVP-stage gaps.
+     */
+    private String previewFor(String mediaType, String ciphertext) {
+        if (mediaType != null) {
+            return switch (mediaType) {
+                case "IMAGE" -> "📷 Photo";
+                case "VIDEO" -> "🎥 Video";
+                case "AUDIO" -> "🎤 Voice message";
+                case "FILE" -> "📎 Document";
+                default -> "New message";
+            };
+        }
+        if (ciphertext == null || ciphertext.isBlank()) {
+            return "New message";
+        }
+        return ciphertext.length() > 120 ? ciphertext.substring(0, 117) + "..." : ciphertext;
     }
 
     /**
