@@ -5,15 +5,19 @@ services:
       POSTGRES_USER: riskyc
       POSTGRES_PASSWORD: riskyc
       POSTGRES_DB: riskyc
+    # Bound to loopback only — every service reaches postgres over the
+    # internal docker network by hostname, so a public port isn't needed;
+    # 127.0.0.1 still lets you `psql` from the host itself (or an SSH
+    # tunnel) without exposing the DB to the internet.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
 
   minio:
     image: minio/minio:latest
@@ -22,8 +26,11 @@ services:
       MINIO_ROOT_USER: riskyc
       MINIO_ROOT_PASSWORD: riskyc-secret
     ports:
+      # 9000 (S3 API) stays public — media-service hands out presigned URLs
+      # against it directly, so the mobile client must be able to reach it.
+      # 9001 (admin console/root credentials) has no reason to be public.
       - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9001:9001"
     volumes:
       - minio-data:/data
 
