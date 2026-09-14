@@ -7,6 +7,8 @@ import com.riskyc.messaging.dto.MessageDeleteRequest;
 import com.riskyc.messaging.dto.MessageEditRequest;
 import com.riskyc.messaging.dto.MessageMutation;
 import com.riskyc.messaging.dto.MessageStatusUpdate;
+import com.riskyc.messaging.dto.TypingIndicator;
+import com.riskyc.messaging.dto.TypingUpdate;
 import com.riskyc.messaging.entity.GroupMember;
 import com.riskyc.messaging.entity.Message;
 import com.riskyc.messaging.entity.MessageReceipt;
@@ -79,6 +81,21 @@ public class ChatController {
         } else {
             messagingTemplate.convertAndSendToUser(inbound.recipientId(), "/queue/messages", outbound);
         }
+    }
+
+    /**
+     * Ephemeral — no persistence, just a relay to whoever currently has this
+     * thread open (works identically for 1:1 and group). userId comes from
+     * the STOMP Principal, never the client payload, so one user can't fake
+     * another's typing state.
+     */
+    @MessageMapping("/chat.typing")
+    public void typing(TypingIndicator inbound, Principal principal) {
+        if (principal == null) {
+            return;
+        }
+        TypingUpdate update = new TypingUpdate(inbound.conversationId(), principal.getName(), inbound.isTyping());
+        messagingTemplate.convertAndSend("/topic/conversation." + inbound.conversationId() + ".typing", update);
     }
 
     @MessageMapping("/chat.ack")
