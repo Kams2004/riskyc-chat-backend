@@ -1,5 +1,15 @@
+FROM maven:3.9-eclipse-temurin-21 AS build
+WORKDIR /build
+COPY pom.xml .
+COPY common ./common
+COPY auth-service ./auth-service
+COPY messaging-service ./messaging-service
+COPY media-service ./media-service
+COPY presence-service ./presence-service
+RUN mvn -q -pl common,auth-service -am package -DskipTests
+
 FROM eclipse-temurin:21-jre-jammy
 WORKDIR /app
-COPY target/auth-service.jar app.jar
+COPY --from=build /build/auth-service/target/auth-service.jar app.jar
 EXPOSE 8081
 ENTRYPOINT ["java", "-jar", "app.jar"]

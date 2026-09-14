@@ -1,3 +1,13 @@
+# Isolation from any other stack already running on the same host: Compose
+# scopes container names, the bridge network, and volumes to this project
+# (named after the directory this file lives in — e.g. "riskyc-chat-backend"
+# on the VPS, distinct from "riskyc-backend"/"riskyc-frontend"), and nothing
+# here joins an external/shared network — so these containers have no path
+# to reach, or be reached by, another stack's containers. The only possible
+# collision is a host port already bound by something else, which fails the
+# affected container's startup loudly (address already in use) rather than
+# causing any cross-talk; every port below is overridable via .env if that
+# happens (see .env.example).
 services:
   postgres:
     image: postgres:16-alpine
@@ -10,14 +20,14 @@ services:
     # 127.0.0.1 still lets you `psql` from the host itself (or an SSH
     # tunnel) without exposing the DB to the internet.
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
   redis:
     image: redis:7-alpine
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
 
   minio:
     image: minio/minio:latest
@@ -29,13 +39,18 @@ services:
       # 9000 (S3 API) stays public — media-service hands out presigned URLs
       # against it directly, so the mobile client must be able to reach it.
       # 9001 (admin console/root credentials) has no reason to be public.
-      - "9000:9000"
-      - "127.0.0.1:9001:9001"
+      - "${MINIO_API_HOST_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
     volumes:
       - minio-data:/data
 
   auth-service:
-    build: ./auth-service
+    # Build context is the backend root, not ./auth-service, because the
+    # Dockerfile's Maven build needs the sibling `common` module too
+    # (multi-module reactor build) — see auth-service/Dockerfile.
+    build:
+      context: .
+      dockerfile: auth-service/Dockerfile
     ports:
       - "${AUTH_SERVICE_HOST_PORT:-8081}:8081"
     environment:
@@ -49,9 +64,11 @@ services:
       - postgres
 
   messaging-service:
-    build: ./messaging-service
+    build:
+      context: .
+      dockerfile: messaging-service/Dockerfile
     ports:
-      - "8082:8082"
+      - "${MESSAGING_SERVICE_HOST_PORT:-8082}:8082"
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/riskyc
       SPRING_DATA_REDIS_HOST: redis
@@ -60,9 +77,11 @@ services:
       - redis
 
   media-service:
-    build: ./media-service
+    build:
+      context: .
+      dockerfile: media-service/Dockerfile
     ports:
-      - "8083:8083"
+      - "${MEDIA_SERVICE_HOST_PORT:-8083}:8083"
     environment:
       RISKYC_MINIO_ENDPOINT: http://minio:9000
       RISKYC_MINIO_PUBLIC_ENDPOINT: ${RISKYC_MINIO_PUBLIC_ENDPOINT:-http://localhost:9000}
@@ -70,9 +89,11 @@ services:
       - minio
 
   presence-service:
-    build: ./presence-service
+    build:
+      context: .
+      dockerfile: presence-service/Dockerfile
     ports:
-      - "8084:8084"
+      - "${PRESENCE_SERVICE_HOST_PORT:-8084}:8084"
     environment:
       SPRING_DATA_REDIS_HOST: redis
     depends_on:
