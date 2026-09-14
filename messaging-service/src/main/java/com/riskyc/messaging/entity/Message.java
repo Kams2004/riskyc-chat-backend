@@ -18,7 +18,7 @@ public class Message {
 
     public enum DeliveryStatus { SENT, DELIVERED, READ }
 
-    public enum MediaType { IMAGE, FILE, AUDIO }
+    public enum MediaType { IMAGE, FILE, AUDIO, CALL }
 
     @Id
     @Column(name = "message_id")

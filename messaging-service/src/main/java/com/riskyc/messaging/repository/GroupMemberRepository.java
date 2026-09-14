@@ -11,6 +11,8 @@ import java.util.Optional;
 public interface GroupMemberRepository extends JpaRepository<GroupMember, Long> {
     List<GroupMember> findByGroupId(String groupId);
 
+    List<GroupMember> findByUserId(String userId);
+
     Optional<GroupMember> findByGroupIdAndUserId(String groupId, String userId);
 
     // Derived delete queries need their own transaction — a plain

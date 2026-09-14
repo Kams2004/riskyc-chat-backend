@@ -9,7 +9,12 @@
 # causing any cross-talk. Default ports below are already shifted off
 # whatever `docker ps` showed taken on the target VPS (riskyc-backend,
 # riskyc-frontend, nguon-app, jitsi) — see .env.example for the exact list
-# and how to override further if a different host needs it.
+# and how to override further if a different host needs it. One exception:
+# coturn runs with network_mode: host (required for TURN's dynamically
+# allocated relay ports to work correctly through Docker at all) — it binds
+# straight to host ports rather than being published through the bridge
+# network like everything else here, but the "loud failure, not silent
+# conflict" guarantee on a taken port still holds either way.
 services:
   postgres:
     image: postgres:16-alpine
@@ -106,6 +111,32 @@ services:
       SPRING_DATA_REDIS_HOST: redis
     depends_on:
       - redis
+
+  # TURN relay for calling: public STUN alone often can't establish a P2P
+  # media path once caller and callee are on genuinely different networks
+  # (mobile data + carrier-grade NAT is the classic failure case) — the call
+  # "connects" at the signaling layer, but no audio/video ever arrives
+  # because no ICE candidate pair ever actually works. TURN relays the media
+  # through this server instead when a direct path can't be found. Static
+  # long-lived username/password (not the more common time-limited HMAC
+  # secret) for now — simple, and adequate for an app already documented as
+  # pre-hardening (plain HTTP, no E2E encryption yet); anyone who decompiles
+  # the APK gets a relay-only credential, not access to anything sensitive.
+  coturn:
+    image: coturn/coturn:latest
+    network_mode: host
+    command:
+      - -n
+      - --listening-port=${TURN_PORT:-3478}
+      - --realm=riskyc.chat
+      - --user=${TURN_USERNAME:-riskyc}:${TURN_PASSWORD:-riskyc-turn-secret}
+      - --external-ip=${TURN_EXTERNAL_IP:-167.86.120.214}
+      - --min-port=${TURN_RELAY_MIN_PORT:-49160}
+      - --max-port=${TURN_RELAY_MAX_PORT:-49200}
+      - --no-cli
+      - --no-tls
+      - --no-dtls
+      - --no-multicast-peers
 
 volumes:
   postgres-data:
