@@ -16,6 +16,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Duration;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.regex.Pattern;
 
 /**
@@ -27,6 +29,8 @@ import java.util.regex.Pattern;
 @RestController
 @RequestMapping("/api/auth")
 public class AuthController {
+
+    private static final Logger log = Logger.getLogger(AuthController.class.getName());
 
     // Deliberately permissive (this isn't validating deliverability, just
     // rejecting obvious garbage before it reaches an SMTP call or gets
@@ -61,6 +65,10 @@ public class AuthController {
     public record OtpVerifyRequest(String phoneNumber, String email, String code, String displayName) {
     }
 
+    /** Returned as the body of a 429 so the client can tell a hard SMS trial cutoff apart from an ordinary "slow down". */
+    public record OtpRequestError(String reason) {
+    }
+
     public record TokenResponse(String accessToken, String userId, String displayName, String avatarObjectKey, String email, String phoneNumber) {
     }
 
@@ -90,16 +98,31 @@ public class AuthController {
     }
 
     @PostMapping("/otp/request")
-    public ResponseEntity<Void> requestOtp(@RequestBody OtpRequest request, HttpServletRequest httpRequest) {
+    public ResponseEntity<OtpRequestError> requestOtp(@RequestBody OtpRequest request, HttpServletRequest httpRequest) {
         String identifier;
+        boolean isPhone = request.phoneNumber() != null && !request.phoneNumber().isBlank();
         try {
             identifier = identifierOf(request.phoneNumber(), request.email());
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().build();
         }
 
+        // General rate limit FIRST: allowSmsTrial() unconditionally
+        // increments its counter just by being called, so if it ran first
+        // and this request then got rejected by the 45s cooldown below
+        // anyway, it would burn one of only 2 real SMS trials on a request
+        // that never even reached Bird. Checking the free-to-retry general
+        // limit first means only a request that's actually about to be
+        // attempted ever counts against the expensive SMS-specific cap.
         if (!rateLimiter.allowIp(clientIp(httpRequest)) || !rateLimiter.allowIdentifier(identifier)) {
-            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).build();
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(new OtpRequestError("RATE_LIMITED"));
+        }
+
+        // SMS costs real money per send — a much tighter, dedicated cap
+        // (2 total) on top of the general rate limit above. Email has no
+        // such cap, so this only ever runs for the phone channel.
+        if (isPhone && !rateLimiter.allowSmsTrial(identifier)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(new OtpRequestError("SMS_TRIAL_LIMIT_REACHED"));
         }
 
         String code = otpService.generateAndStore(identifier);
@@ -110,6 +133,12 @@ public class AuthController {
                 smsOtpSender.sendOtp(request.phoneNumber(), code);
             }
         } catch (RuntimeException e) {
+            // Logged with the full message (SmsOtpSender/EmailOtpSender put
+            // the provider's actual rejection reason in there) — this was
+            // previously swallowed entirely, turning a diagnosable failure
+            // into "the client got a 502 and nobody knows why" the first
+            // time this fired for real.
+            log.log(Level.WARNING, "OTP send failed for " + (isPhone ? "phone" : "email") + " channel", e);
             // The code is already stored and would otherwise verify
             // successfully even though the person never received it — a
             // clear 502 here is far more useful than either a silent 202
