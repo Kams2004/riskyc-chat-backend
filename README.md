@@ -46,6 +46,38 @@ Mailgun, SES all offer one) instead; `EmailOtpSender` doesn't change.
 **API shape**: `POST /api/auth/otp/request` and `POST /api/auth/otp/verify` now take either
 `{"phoneNumber": "..."}` or `{"email": "..."}` — exactly one, never both — as the identifier.
 
+## Sending real OTP SMS (Bird)
+
+`auth-service` sends phone OTPs via [Bird's SMS API](https://bird.com/docs/guides/sms/sending-sms)
+(`SmsOtpSender`), configured entirely through environment variables — same pattern as email, so
+swapping providers later is a config change, not a code change.
+
+1. Create a Bird account and workspace at https://bird.com if you don't have one.
+2. Grab an API key from the dashboard — it looks like `bk_us1_...` or `bk_eu1_...`. The prefix is
+   the region; note which one you have.
+3. **Enable the destination countries you'll actually receive sign-ups from.** Bird starts with a
+   default-deny allowlist — only your organization's home country is enabled. Any other country is
+   rejected with `422 SMSDestinationNotEnabled` until you add it under **SMS > Destinations** in
+   the Bird dashboard. This is the single most common way a first SMS send fails.
+4. Copy `backend/.env.example` to `backend/.env` and fill in:
+   ```
+   RISKYC_BIRD_API_KEY=bk_us1_your-real-key
+   RISKYC_BIRD_API_BASE_URL=https://us1.platform.bird.com
+   ```
+   `RISKYC_BIRD_API_BASE_URL` **must match your key's region** — a `bk_eu1_...` key against the
+   `us1` host (or vice versa) will fail. Use `https://eu1.platform.bird.com` for a `bk_eu1_...` key.
+5. Optionally set `RISKYC_SMS_SENDER` (default `RiskyC`) — the alphanumeric sender ID recipients
+   see. Some destination countries require alphanumeric senders to be pre-registered with Bird
+   before they'll deliver from one (see **SMS sender IDs** in Bird's docs); others, notably the US,
+   don't support alphanumeric senders at all and need a real phone number you own as `from` instead
+   — if you're targeting the US, replace `RISKYC_SMS_SENDER` with an owned number in E.164 instead
+   of a sender ID.
+6. Run `docker compose --env-file .env up --build`.
+
+Left unconfigured (`RISKYC_BIRD_API_KEY` blank), `SmsOtpSender` logs the code to stdout instead of
+sending it — fine for local/dev use, not for anything real. Phone numbers must be in E.164 format
+(a leading `+`) — `AuthController` rejects anything else with a `400` before it ever reaches Bird.
+
 ## Known gaps (by design, not oversight)
 
 - **No end-to-end encryption yet.** `ciphertext` fields currently carry plaintext. Signal Protocol integration is a separate, larger effort — see phase 2/3 in the architecture proposal.

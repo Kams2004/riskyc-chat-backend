@@ -35,3 +35,15 @@ riskyc:
     # The web sign-in form's origin(s), comma-separated — see WebConfig.
     # Defaults cover local Vite dev (5173) and the VPS's web container port.
     allowed-origins: ${RISKYC_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://167.86.120.214:8085}
+  sms:
+    # See backend/README.md for how to get these from the Bird dashboard.
+    # Left blank, SmsOtpSender falls back to logging instead of sending
+    # (dev/local use only) rather than attempting a doomed call.
+    bird-api-key: ${RISKYC_BIRD_API_KEY:}
+    # Must match the API key's region (bk_us1_... -> us1, bk_eu1_... -> eu1).
+    bird-api-base-url: ${RISKYC_BIRD_API_BASE_URL:https://us1.platform.bird.com}
+    # Alphanumeric sender ID shown to the recipient — not supported for
+    # every destination country (the US notably doesn't support them at
+    # all), and some countries require it to be pre-registered with Bird.
+    # See backend/README.md.
+    sender: ${RISKYC_SMS_SENDER:RiskyC}

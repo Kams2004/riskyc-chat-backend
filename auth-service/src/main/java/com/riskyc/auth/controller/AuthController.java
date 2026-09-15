@@ -5,6 +5,7 @@ import com.riskyc.auth.repository.UserRepository;
 import com.riskyc.auth.service.EmailOtpSender;
 import com.riskyc.auth.service.OtpRateLimiter;
 import com.riskyc.auth.service.OtpService;
+import com.riskyc.auth.service.SmsOtpSender;
 import com.riskyc.common.security.JwtIssuer;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
@@ -19,9 +20,9 @@ import java.util.regex.Pattern;
 
 /**
  * OTP verification accepts EITHER a phone number or an email address as the
- * identifier — exactly one must be present on every request. Phone delivery
- * is still a stub (logged to stdout, see OtpService's doc comment on
- * OtpRequest handling below); email delivery is real, via EmailOtpSender.
+ * identifier — exactly one must be present on every request. Both delivery
+ * channels are real: email via EmailOtpSender (SMTP), phone via
+ * SmsOtpSender (Bird's SMS API).
  */
 @RestController
 @RequestMapping("/api/auth")
@@ -31,21 +32,27 @@ public class AuthController {
     // rejecting obvious garbage before it reaches an SMTP call or gets
     // stored) — a real provider will reject anything it can't deliver anyway.
     private static final Pattern EMAIL_PATTERN = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]{2,}$");
-    private static final Pattern PHONE_PATTERN = Pattern.compile("^\\+?[0-9]{7,15}$");
+    // Requires a leading '+' (E.164) — Bird's SMS API rejects anything else
+    // outright, so a number that would just bounce off the SMS provider is
+    // caught here instead, with a clear 400, rather than surfacing as an
+    // opaque failure from SmsOtpSender.
+    private static final Pattern PHONE_PATTERN = Pattern.compile("^\\+[0-9]{7,15}$");
 
     private final OtpService otpService;
     private final OtpRateLimiter rateLimiter;
     private final UserRepository userRepository;
     private final JwtIssuer jwtIssuer;
     private final EmailOtpSender emailOtpSender;
+    private final SmsOtpSender smsOtpSender;
 
     public AuthController(OtpService otpService, OtpRateLimiter rateLimiter, UserRepository userRepository,
-                           JwtIssuer jwtIssuer, EmailOtpSender emailOtpSender) {
+                           JwtIssuer jwtIssuer, EmailOtpSender emailOtpSender, SmsOtpSender smsOtpSender) {
         this.otpService = otpService;
         this.rateLimiter = rateLimiter;
         this.userRepository = userRepository;
         this.jwtIssuer = jwtIssuer;
         this.emailOtpSender = emailOtpSender;
+        this.smsOtpSender = smsOtpSender;
     }
 
     public record OtpRequest(String phoneNumber, String email) {
@@ -96,11 +103,18 @@ public class AuthController {
         }
 
         String code = otpService.generateAndStore(identifier);
-        if (request.email() != null && !request.email().isBlank()) {
-            emailOtpSender.sendOtp(request.email(), code);
-        } else {
-            // TODO: wire up an SMS provider. Logging for local/dev use only.
-            System.out.printf("OTP for %s: %s%n", request.phoneNumber(), code);
+        try {
+            if (request.email() != null && !request.email().isBlank()) {
+                emailOtpSender.sendOtp(request.email(), code);
+            } else {
+                smsOtpSender.sendOtp(request.phoneNumber(), code);
+            }
+        } catch (RuntimeException e) {
+            // The code is already stored and would otherwise verify
+            // successfully even though the person never received it — a
+            // clear 502 here is far more useful than either a silent 202
+            // for a message that never sent, or an opaque 500.
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
         }
         return ResponseEntity.accepted().build();
     }
