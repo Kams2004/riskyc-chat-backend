@@ -31,3 +31,7 @@ riskyc:
   mail:
     # The address OTP emails are sent from — usually the same as spring.mail.username.
     from: ${RISKYC_MAIL_FROM:${RISKYC_MAIL_USERNAME:}}
+  cors:
+    # The web sign-in form's origin(s), comma-separated — see WebConfig.
+    # Defaults cover local Vite dev (5173) and the VPS's web container port.
+    allowed-origins: ${RISKYC_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://167.86.120.214:8085}
