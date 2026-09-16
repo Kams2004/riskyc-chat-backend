@@ -13,7 +13,7 @@ WORKDIR /build
 # under some sandboxed/emulated Docker builders), it falls back to compiling
 # the worker from source, which needs python3 + a C++ toolchain — bookworm-
 # slim has neither by default.
-RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip make g++ ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json* ./
 RUN npm install
 COPY tsconfig.json ./
