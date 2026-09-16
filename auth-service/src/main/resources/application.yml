@@ -41,6 +41,26 @@ riskyc:
     # disables the check for local dev, same blank-default pattern already
     # used for the SMS/mail credentials below.
     api-key: ${RISKYC_INTERNAL_API_KEY:}
+  system-account:
+    # A special identifier that, when submitted as the "email" to
+    # POST /api/auth/otp/request, logs straight into the RiskyC Fashion
+    # system account — no code sent, no Bird/SMTP call made at all. This is
+    # the account every new user gets an automatic welcome message from
+    # (see AuthController's new-user branch) and the one used to post any
+    # future official announcements. Blank disables the whole feature: every
+    # identifier is then handled by the normal OTP flow, same as before this
+    # existed. Should be a long random value kept secret out-of-band (not
+    # committed anywhere), formatted like an email address so it passes the
+    # client's own identifier validation without any special-casing there.
+    access-email: ${RISKYC_SYSTEM_ACCOUNT_ACCESS_EMAIL:}
+    display-name: ${RISKYC_SYSTEM_ACCOUNT_DISPLAY_NAME:RiskyC Fashion}
+    welcome-message: ${RISKYC_SYSTEM_ACCOUNT_WELCOME_MESSAGE:Welcome to RiskyC Chat! We're glad you're here. If you ever need help or have questions, just reply to this message.}
+  messaging-service:
+    # First time auth-service calls OUT to messaging-service (every other
+    # cross-service call in this codebase goes the other direction) — only
+    # used to deliver the new-account welcome message. Same internal-network
+    # hostname convention as messaging-service's own riskyc.auth-service.internal-url.
+    internal-url: ${RISKYC_MESSAGING_SERVICE_INTERNAL_URL:http://messaging-service:8082}
   sms:
     # See backend/README.md for how to get these from the Bird dashboard.
     # Left blank, SmsOtpSender falls back to logging instead of sending

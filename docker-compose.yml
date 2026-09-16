@@ -77,6 +77,10 @@ services:
       RISKYC_SMS_SENDER: ${RISKYC_SMS_SENDER:-RiskyC}
       RISKYC_CORS_ALLOWED_ORIGINS: ${RISKYC_CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://167.86.120.214:8085,https://chat.riskycfashion.com}
       RISKYC_INTERNAL_API_KEY: ${RISKYC_INTERNAL_API_KEY:-}
+      RISKYC_SYSTEM_ACCOUNT_ACCESS_EMAIL: ${RISKYC_SYSTEM_ACCOUNT_ACCESS_EMAIL:-}
+      RISKYC_SYSTEM_ACCOUNT_DISPLAY_NAME: ${RISKYC_SYSTEM_ACCOUNT_DISPLAY_NAME:-RiskyC Fashion}
+      RISKYC_SYSTEM_ACCOUNT_WELCOME_MESSAGE: ${RISKYC_SYSTEM_ACCOUNT_WELCOME_MESSAGE:-Welcome to RiskyC Chat! We're glad you're here. If you ever need help or have questions, just reply to this message.}
+      RISKYC_MESSAGING_SERVICE_INTERNAL_URL: ${RISKYC_MESSAGING_SERVICE_INTERNAL_URL:-http://messaging-service:8082}
     depends_on:
       - postgres
 

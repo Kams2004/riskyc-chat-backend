@@ -9,6 +9,7 @@ import com.riskyc.auth.service.IdentifierValidator;
 import com.riskyc.auth.service.OtpRateLimiter;
 import com.riskyc.auth.service.OtpService;
 import com.riskyc.auth.service.SmsOtpSender;
+import com.riskyc.auth.service.SystemAccountService;
 import com.riskyc.common.security.JwtIssuer;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -43,10 +45,11 @@ public class AuthController {
     private final JwtIssuer jwtIssuer;
     private final EmailOtpSender emailOtpSender;
     private final SmsOtpSender smsOtpSender;
+    private final SystemAccountService systemAccountService;
 
     public AuthController(OtpService otpService, OtpRateLimiter rateLimiter, UserRepository userRepository,
                            SessionRepository sessionRepository, JwtIssuer jwtIssuer, EmailOtpSender emailOtpSender,
-                           SmsOtpSender smsOtpSender) {
+                           SmsOtpSender smsOtpSender, SystemAccountService systemAccountService) {
         this.otpService = otpService;
         this.rateLimiter = rateLimiter;
         this.userRepository = userRepository;
@@ -54,6 +57,7 @@ public class AuthController {
         this.jwtIssuer = jwtIssuer;
         this.emailOtpSender = emailOtpSender;
         this.smsOtpSender = smsOtpSender;
+        this.systemAccountService = systemAccountService;
     }
 
     public record OtpRequest(String phoneNumber, String email) {
@@ -81,13 +85,28 @@ public class AuthController {
     }
 
     @PostMapping("/otp/request")
-    public ResponseEntity<OtpRequestError> requestOtp(@RequestBody OtpRequest request, HttpServletRequest httpRequest) {
+    public ResponseEntity<?> requestOtp(@RequestBody OtpRequest request, HttpServletRequest httpRequest) {
         String identifier;
         boolean isPhone = request.phoneNumber() != null && !request.phoneNumber().isBlank();
         try {
             identifier = IdentifierValidator.identifierOf(request.phoneNumber(), request.email());
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().build();
+        }
+
+        // Special-cased ahead of everything else below: no OTP is generated,
+        // no SMS/email is ever sent, and no rate limit applies — this is a
+        // secret-identifier login, not an OTP request. See
+        // SystemAccountService's doc comment for the full design. The client
+        // recognizes a 200-with-token-body here (instead of the normal 202
+        // empty body) and skips straight past the code-entry screen.
+        if (systemAccountService.matchesAccessIdentifier(request.email())) {
+            User system = systemAccountService.findOrCreateAccount();
+            String jti = UUID.randomUUID().toString();
+            String token = jwtIssuer.issue(system.getId().toString(), Duration.ofDays(30), jti);
+            sessionRepository.save(new Session(jti, system.getId(), "System account access", Instant.now()));
+            return ResponseEntity.ok(new TokenResponse(token, system.getId().toString(), system.getDisplayName(),
+                    system.getAvatarObjectKey(), system.getEmail(), system.getPhoneNumber()));
         }
 
         // General rate limit FIRST: allowSmsTrial() unconditionally
@@ -145,11 +164,15 @@ public class AuthController {
         }
 
         boolean byEmail = request.email() != null && !request.email().isBlank();
-        User user = byEmail
-                ? userRepository.findByEmail(identifier)
-                        .orElseGet(() -> userRepository.save(User.withEmail(identifier, request.displayName())))
-                : userRepository.findByPhoneNumber(identifier)
-                        .orElseGet(() -> userRepository.save(User.withPhoneNumber(identifier, request.displayName())));
+        Optional<User> existing = byEmail ? userRepository.findByEmail(identifier) : userRepository.findByPhoneNumber(identifier);
+        boolean isNewUser = existing.isEmpty();
+        User user = existing.orElseGet(() -> userRepository.save(byEmail
+                ? User.withEmail(identifier, request.displayName())
+                : User.withPhoneNumber(identifier, request.displayName())));
+
+        if (isNewUser) {
+            systemAccountService.sendWelcomeMessage(user);
+        }
 
         String jti = UUID.randomUUID().toString();
         String token = jwtIssuer.issue(user.getId().toString(), Duration.ofDays(30), jti);
