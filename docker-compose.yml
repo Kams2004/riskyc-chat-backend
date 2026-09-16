@@ -161,8 +161,7 @@ services:
   # host-reachable value, not an internal-hostname one.
   sfu-service:
     build:
-      context: .
-      dockerfile: sfu-service/Dockerfile
+      context: ./sfu-service
     network_mode: host
     environment:
       SFU_PORT: ${SFU_SERVICE_HOST_PORT:-8095}
