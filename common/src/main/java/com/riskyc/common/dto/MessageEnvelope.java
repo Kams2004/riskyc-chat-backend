@@ -35,6 +35,8 @@ public record MessageEnvelope(
         String replyToConversationId,
         String replyToSenderId,
         String replyToSnippet,
-        boolean pinned
+        boolean pinned,
+        /** Only set on a group-call log entry — see Message.java's own field comment. */
+        Integer mediaParticipantCount
 ) {
 }

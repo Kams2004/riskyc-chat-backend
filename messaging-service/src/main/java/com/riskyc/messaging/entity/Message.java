@@ -71,6 +71,14 @@ public class Message {
     @Column(name = "media_duration_ms")
     private Integer mediaDurationMs;
 
+    // Only ever set on a group-call log entry (mediaType=CALL, groupId
+    // non-null) — how many people were in the call, so the client can render
+    // "Group call · 4 people · 12m" without needing a separate lookup. Null
+    // for every other message, including a 1:1 call log (which already
+    // implies exactly 2 participants).
+    @Column(name = "media_participant_count")
+    private Integer mediaParticipantCount;
+
     @Column(name = "edited", nullable = false)
     private boolean edited = false;
 
@@ -202,6 +210,14 @@ public class Message {
 
     public void setMediaDurationMs(Integer mediaDurationMs) {
         this.mediaDurationMs = mediaDurationMs;
+    }
+
+    public Integer getMediaParticipantCount() {
+        return mediaParticipantCount;
+    }
+
+    public void setMediaParticipantCount(Integer mediaParticipantCount) {
+        this.mediaParticipantCount = mediaParticipantCount;
     }
 
     public boolean isEdited() {

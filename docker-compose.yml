@@ -148,6 +148,38 @@ services:
       - --no-dtls
       - --no-multicast-peers
 
+  # Group-calling SFU (mediasoup) — see backend/sfu-service/ for the full
+  # writeup. network_mode: host for the same reason as coturn above: the
+  # mediasoup WebRtcServer's UDP/TCP ports must be directly reachable, not
+  # NAT'd through Docker's bridge. One consequence: unlike every other
+  # service here, this container does NOT sit on the compose bridge network,
+  # so it reaches auth-service/messaging-service via their HOST-mapped ports
+  # (127.0.0.1:8091/:8092) rather than internal Docker hostnames the way
+  # RevokedJtiCache.java does — the defaults below reflect that; if you ever
+  # override RISKYC_AUTH_SERVICE_INTERNAL_URL / RISKYC_MESSAGING_SERVICE_INTERNAL_URL
+  # for messaging-service's own use, remember sfu-service needs a
+  # host-reachable value, not an internal-hostname one.
+  sfu-service:
+    build:
+      context: .
+      dockerfile: sfu-service/Dockerfile
+    network_mode: host
+    environment:
+      SFU_PORT: ${SFU_SERVICE_HOST_PORT:-8095}
+      SFU_ANNOUNCED_IP: ${TURN_EXTERNAL_IP:-167.86.120.214}
+      SFU_WEBRTC_SERVER_PORT_BASE: ${SFU_WEBRTC_PORT_BASE:-50000}
+      SFU_WORKER_COUNT: ${SFU_WORKER_COUNT:-2}
+      RISKYC_JWT_SECRET: ${RISKYC_JWT_SECRET:-ZmFrZS1kZXYtc2VjcmV0LWRvLW5vdC11c2UtaW4tcHJvZC1wbGVhc2UtY2hhbmdlLW1l}
+      RISKYC_INTERNAL_API_KEY: ${RISKYC_INTERNAL_API_KEY:-}
+      RISKYC_AUTH_SERVICE_INTERNAL_URL: ${RISKYC_AUTH_SERVICE_INTERNAL_URL:-http://127.0.0.1:8091}
+      RISKYC_MESSAGING_SERVICE_INTERNAL_URL: ${RISKYC_MESSAGING_SERVICE_INTERNAL_URL:-http://127.0.0.1:8092}
+      RISKYC_TURN_SERVER_URL: turn:${TURN_EXTERNAL_IP:-167.86.120.214}:${TURN_PORT:-3478}
+      RISKYC_TURN_USERNAME: ${TURN_USERNAME:-riskyc}
+      RISKYC_TURN_CREDENTIAL: ${TURN_PASSWORD:-riskyc-turn-secret}
+    depends_on:
+      - auth-service
+      - messaging-service
+
 volumes:
   postgres-data:
   minio-data:

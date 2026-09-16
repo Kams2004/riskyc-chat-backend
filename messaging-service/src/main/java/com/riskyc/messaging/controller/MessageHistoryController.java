@@ -87,7 +87,7 @@ public class MessageHistoryController {
                         m.isEdited(), m.isDeleted(), m.getGroupId(), m.isForwarded(),
                         attachmentsByMessage.getOrDefault(m.getMessageId(), List.of()),
                         m.getReplyToMessageId(), m.getReplyToConversationId(), m.getReplyToSenderId(),
-                        m.getReplyToSnippet(), m.isPinned()))
+                        m.getReplyToSnippet(), m.isPinned(), m.getMediaParticipantCount()))
                 .toList();
     }
 

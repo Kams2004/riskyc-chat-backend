@@ -146,7 +146,7 @@ public class ChatController {
                 message.getStatus().name(), inbound.mediaType(), inbound.mediaObjectKey(),
                 inbound.mediaFileName(), inbound.mediaDurationMs(), false, false, inbound.groupId(),
                 inbound.forwarded(), attachmentDtos, inbound.replyToMessageId(), inbound.replyToConversationId(),
-                inbound.replyToSenderId(), inbound.replyToSnippet(), false);
+                inbound.replyToSenderId(), inbound.replyToSnippet(), false, null);
         messagingTemplate.convertAndSend("/topic/conversation." + inbound.conversationId(), outbound);
 
         String previewBody = previewFor(inbound.mediaType(), inbound.ciphertext(), attachmentDtos.size());
