@@ -1,8 +1,11 @@
 package com.riskyc.auth.controller;
 
+import com.riskyc.auth.entity.Session;
 import com.riskyc.auth.entity.User;
+import com.riskyc.auth.repository.SessionRepository;
 import com.riskyc.auth.repository.UserRepository;
 import com.riskyc.auth.service.EmailOtpSender;
+import com.riskyc.auth.service.IdentifierValidator;
 import com.riskyc.auth.service.OtpRateLimiter;
 import com.riskyc.auth.service.OtpService;
 import com.riskyc.auth.service.SmsOtpSender;
@@ -16,9 +19,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Duration;
+import java.time.Instant;
+import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import java.util.regex.Pattern;
 
 /**
  * OTP verification accepts EITHER a phone number or an email address as the
@@ -32,28 +36,21 @@ public class AuthController {
 
     private static final Logger log = Logger.getLogger(AuthController.class.getName());
 
-    // Deliberately permissive (this isn't validating deliverability, just
-    // rejecting obvious garbage before it reaches an SMTP call or gets
-    // stored) — a real provider will reject anything it can't deliver anyway.
-    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]{2,}$");
-    // Requires a leading '+' (E.164) — Bird's SMS API rejects anything else
-    // outright, so a number that would just bounce off the SMS provider is
-    // caught here instead, with a clear 400, rather than surfacing as an
-    // opaque failure from SmsOtpSender.
-    private static final Pattern PHONE_PATTERN = Pattern.compile("^\\+[0-9]{7,15}$");
-
     private final OtpService otpService;
     private final OtpRateLimiter rateLimiter;
     private final UserRepository userRepository;
+    private final SessionRepository sessionRepository;
     private final JwtIssuer jwtIssuer;
     private final EmailOtpSender emailOtpSender;
     private final SmsOtpSender smsOtpSender;
 
     public AuthController(OtpService otpService, OtpRateLimiter rateLimiter, UserRepository userRepository,
-                           JwtIssuer jwtIssuer, EmailOtpSender emailOtpSender, SmsOtpSender smsOtpSender) {
+                           SessionRepository sessionRepository, JwtIssuer jwtIssuer, EmailOtpSender emailOtpSender,
+                           SmsOtpSender smsOtpSender) {
         this.otpService = otpService;
         this.rateLimiter = rateLimiter;
         this.userRepository = userRepository;
+        this.sessionRepository = sessionRepository;
         this.jwtIssuer = jwtIssuer;
         this.emailOtpSender = emailOtpSender;
         this.smsOtpSender = smsOtpSender;
@@ -62,7 +59,8 @@ public class AuthController {
     public record OtpRequest(String phoneNumber, String email) {
     }
 
-    public record OtpVerifyRequest(String phoneNumber, String email, String code, String displayName) {
+    /** deviceLabel is client-supplied, display-only (e.g. "iPhone 15 — Safari") — shown on the logged-in-devices screen, never trusted for anything security-relevant. */
+    public record OtpVerifyRequest(String phoneNumber, String email, String code, String displayName, String deviceLabel) {
     }
 
     /** Returned as the body of a 429 so the client can tell a hard SMS trial cutoff apart from an ordinary "slow down". */
@@ -70,21 +68,6 @@ public class AuthController {
     }
 
     public record TokenResponse(String accessToken, String userId, String displayName, String avatarObjectKey, String email, String phoneNumber) {
-    }
-
-    private static String identifierOf(String phoneNumber, String email) {
-        boolean hasPhone = phoneNumber != null && !phoneNumber.isBlank();
-        boolean hasEmail = email != null && !email.isBlank();
-        if (hasPhone == hasEmail) {
-            throw new IllegalArgumentException("Provide exactly one of phoneNumber or email");
-        }
-        if (hasEmail && !EMAIL_PATTERN.matcher(email).matches()) {
-            throw new IllegalArgumentException("Malformed email");
-        }
-        if (hasPhone && !PHONE_PATTERN.matcher(phoneNumber).matches()) {
-            throw new IllegalArgumentException("Malformed phone number");
-        }
-        return hasPhone ? phoneNumber : email;
     }
 
     /**
@@ -102,7 +85,7 @@ public class AuthController {
         String identifier;
         boolean isPhone = request.phoneNumber() != null && !request.phoneNumber().isBlank();
         try {
-            identifier = identifierOf(request.phoneNumber(), request.email());
+            identifier = IdentifierValidator.identifierOf(request.phoneNumber(), request.email());
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().build();
         }
@@ -152,7 +135,7 @@ public class AuthController {
     public ResponseEntity<TokenResponse> verifyOtp(@RequestBody OtpVerifyRequest request) {
         String identifier;
         try {
-            identifier = identifierOf(request.phoneNumber(), request.email());
+            identifier = IdentifierValidator.identifierOf(request.phoneNumber(), request.email());
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().build();
         }
@@ -168,7 +151,9 @@ public class AuthController {
                 : userRepository.findByPhoneNumber(identifier)
                         .orElseGet(() -> userRepository.save(User.withPhoneNumber(identifier, request.displayName())));
 
-        String token = jwtIssuer.issue(user.getId().toString(), Duration.ofDays(30));
+        String jti = UUID.randomUUID().toString();
+        String token = jwtIssuer.issue(user.getId().toString(), Duration.ofDays(30), jti);
+        sessionRepository.save(new Session(jti, user.getId(), request.deviceLabel(), Instant.now()));
         return ResponseEntity.ok(new TokenResponse(token, user.getId().toString(), user.getDisplayName(),
                 user.getAvatarObjectKey(), user.getEmail(), user.getPhoneNumber()));
     }

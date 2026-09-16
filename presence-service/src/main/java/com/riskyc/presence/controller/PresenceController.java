@@ -9,6 +9,17 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
 
+/**
+ * Documented MVP gap: no authentication check of any kind today — not even
+ * bare JWT signature verification, let alone the session-revocation checks
+ * added to auth-service/messaging-service. Anyone who can reach this service
+ * can post a heartbeat/offline event or read presence for any userId. This
+ * service is Postgres-free (Redis-only), so wiring in JwtIssuer + the
+ * revocation checks the other two services now have would be a reasonable
+ * next step, not attempted in this pass — blast radius here is low (online/
+ * last-seen signal only, no message content or media), which is why this
+ * was deprioritized rather than fixed alongside media-service's gap.
+ */
 @RestController
 @RequestMapping("/api/presence")
 public class PresenceController {

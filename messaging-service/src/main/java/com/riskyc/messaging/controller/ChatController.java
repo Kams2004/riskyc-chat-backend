@@ -1,29 +1,38 @@
 package com.riskyc.messaging.controller;
 
+import com.riskyc.common.dto.AttachmentDto;
 import com.riskyc.common.dto.MessageEnvelope;
 import com.riskyc.messaging.dto.GroupAckRequest;
 import com.riskyc.messaging.dto.GroupReceiptUpdate;
 import com.riskyc.messaging.dto.MessageDeleteRequest;
 import com.riskyc.messaging.dto.MessageEditRequest;
 import com.riskyc.messaging.dto.MessageMutation;
+import com.riskyc.messaging.dto.MessagePinRequest;
 import com.riskyc.messaging.dto.MessageStatusUpdate;
 import com.riskyc.messaging.dto.TypingIndicator;
 import com.riskyc.messaging.dto.TypingUpdate;
 import com.riskyc.messaging.entity.GroupConversation;
 import com.riskyc.messaging.entity.GroupMember;
 import com.riskyc.messaging.entity.Message;
+import com.riskyc.messaging.entity.MessageAttachment;
+import com.riskyc.messaging.entity.MessageDeletion;
 import com.riskyc.messaging.entity.MessageReceipt;
 import com.riskyc.messaging.repository.GroupConversationRepository;
 import com.riskyc.messaging.repository.GroupMemberRepository;
+import com.riskyc.messaging.repository.MessageAttachmentRepository;
+import com.riskyc.messaging.repository.MessageDeletionRepository;
 import com.riskyc.messaging.repository.MessageReceiptRepository;
 import com.riskyc.messaging.repository.MessageRepository;
 import com.riskyc.messaging.service.PushNotificationService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 
 import java.security.Principal;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,50 +50,106 @@ import java.util.UUID;
 @Controller
 public class ChatController {
 
+    private static final Logger log = LoggerFactory.getLogger(ChatController.class);
+
     private final MessageRepository messageRepository;
     private final GroupMemberRepository groupMemberRepository;
     private final GroupConversationRepository groupConversationRepository;
     private final MessageReceiptRepository receiptRepository;
+    private final MessageDeletionRepository messageDeletionRepository;
+    private final MessageAttachmentRepository messageAttachmentRepository;
     private final SimpMessagingTemplate messagingTemplate;
     private final PushNotificationService pushNotificationService;
 
     public ChatController(MessageRepository messageRepository, GroupMemberRepository groupMemberRepository,
                            GroupConversationRepository groupConversationRepository, MessageReceiptRepository receiptRepository,
+                           MessageDeletionRepository messageDeletionRepository, MessageAttachmentRepository messageAttachmentRepository,
                            SimpMessagingTemplate messagingTemplate, PushNotificationService pushNotificationService) {
         this.messageRepository = messageRepository;
         this.groupMemberRepository = groupMemberRepository;
         this.groupConversationRepository = groupConversationRepository;
         this.receiptRepository = receiptRepository;
+        this.messageDeletionRepository = messageDeletionRepository;
+        this.messageAttachmentRepository = messageAttachmentRepository;
         this.messagingTemplate = messagingTemplate;
         this.pushNotificationService = pushNotificationService;
     }
 
     @MessageMapping("/chat.send")
     public void send(MessageEnvelope inbound) {
+        boolean isGroup = inbound.groupId() != null;
+
+        // Announcement-group enforcement. STOMP handlers here are
+        // fire-and-forget with no response channel, so there's nothing to
+        // reject back to the client — the real UX guard is the client hiding
+        // the composer for non-admins; this is pure defense-in-depth that
+        // should be unreachable in normal use, hence a silent drop + log
+        // rather than any client-visible error.
+        if (isGroup) {
+            boolean onlyAdmins = groupConversationRepository.findById(inbound.groupId())
+                    .map(GroupConversation::isOnlyAdminsCanMessage).orElse(false);
+            if (onlyAdmins) {
+                GroupMember.Role senderRole = groupMemberRepository
+                        .findByGroupIdAndUserId(inbound.groupId(), inbound.senderId())
+                        .map(GroupMember::getRole).orElse(null);
+                if (senderRole != GroupMember.Role.ADMIN) {
+                    log.warn("Dropped message from non-admin {} into announcement-only group {}",
+                            inbound.senderId(), inbound.groupId());
+                    return;
+                }
+            }
+        }
+
         String messageId = inbound.messageId() != null ? inbound.messageId() : UUID.randomUUID().toString();
         Instant sentAt = inbound.sentAt() != null ? inbound.sentAt() : Instant.now();
-        boolean isGroup = inbound.groupId() != null;
 
         Message message = new Message(messageId, inbound.conversationId(), inbound.senderId(),
                 isGroup ? inbound.groupId() : inbound.recipientId(), inbound.ciphertext(), sentAt);
         if (isGroup) {
             message.setGroupId(inbound.groupId());
         }
+        message.setReplyToMessageId(inbound.replyToMessageId());
+        message.setReplyToConversationId(inbound.replyToConversationId());
+        message.setReplyToSenderId(inbound.replyToSenderId());
+        message.setReplyToSnippet(inbound.replyToSnippet());
         if (inbound.mediaType() != null) {
             message.setMediaType(Message.MediaType.valueOf(inbound.mediaType()));
             message.setMediaObjectKey(inbound.mediaObjectKey());
             message.setMediaFileName(inbound.mediaFileName());
             message.setMediaDurationMs(inbound.mediaDurationMs());
         }
+        // A forward IS a send (same validation/broadcast/push-notification
+        // logic, just a fresh messageId in a possibly different
+        // conversation) — no separate endpoint, just this one extra flag.
+        message.setForwarded(inbound.forwarded());
         messageRepository.save(message);
+
+        // Multi-attachment (gallery) send: a message never uses both this
+        // and the scalar mediaType/mediaObjectKey path (see MessageEnvelope's
+        // own doc comment) — inbound.mediaType() is null whenever attachments
+        // are present, so message's own scalar columns stay untouched.
+        List<AttachmentDto> attachmentDtos = List.of();
+        if (inbound.attachments() != null && !inbound.attachments().isEmpty()) {
+            List<MessageAttachment> rows = new ArrayList<>();
+            List<AttachmentDto> dtos = new ArrayList<>();
+            for (AttachmentDto a : inbound.attachments()) {
+                rows.add(new MessageAttachment(messageId, a.position(), Message.MediaType.valueOf(a.mediaType()),
+                        a.mediaObjectKey(), a.mediaFileName(), a.mediaDurationMs()));
+                dtos.add(a);
+            }
+            messageAttachmentRepository.saveAll(rows);
+            attachmentDtos = dtos;
+        }
 
         MessageEnvelope outbound = new MessageEnvelope(messageId, inbound.conversationId(),
                 inbound.senderId(), message.getRecipientId(), inbound.ciphertext(), sentAt,
                 message.getStatus().name(), inbound.mediaType(), inbound.mediaObjectKey(),
-                inbound.mediaFileName(), inbound.mediaDurationMs(), false, false, inbound.groupId());
+                inbound.mediaFileName(), inbound.mediaDurationMs(), false, false, inbound.groupId(),
+                inbound.forwarded(), attachmentDtos, inbound.replyToMessageId(), inbound.replyToConversationId(),
+                inbound.replyToSenderId(), inbound.replyToSnippet(), false);
         messagingTemplate.convertAndSend("/topic/conversation." + inbound.conversationId(), outbound);
 
-        String previewBody = previewFor(inbound.mediaType(), inbound.ciphertext());
+        String previewBody = previewFor(inbound.mediaType(), inbound.ciphertext(), attachmentDtos.size());
         Map<String, Object> pushData = new LinkedHashMap<>();
         pushData.put("type", "message");
         pushData.put("conversationId", inbound.conversationId());
@@ -112,7 +177,10 @@ public class ChatController {
      * send, just for notification cosmetics. Kept simple for now — see
      * backend/README.md's other documented MVP-stage gaps.
      */
-    private String previewFor(String mediaType, String ciphertext) {
+    private String previewFor(String mediaType, String ciphertext, int attachmentCount) {
+        if (attachmentCount > 1) {
+            return "📷 " + attachmentCount + " photos";
+        }
         if (mediaType != null) {
             return switch (mediaType) {
                 case "IMAGE" -> "📷 Photo";
@@ -144,7 +212,7 @@ public class ChatController {
     }
 
     @MessageMapping("/chat.ack")
-    public void ack(MessageStatusUpdate update) {
+    public void ack(MessageStatusUpdate update, Principal principal) {
         Message.DeliveryStatus newStatus = Message.DeliveryStatus.valueOf(update.status());
         for (String messageId : update.messageIds()) {
             messageRepository.findById(messageId).ifPresent(message -> {
@@ -155,6 +223,15 @@ public class ChatController {
             });
         }
         messagingTemplate.convertAndSend("/topic/conversation." + update.conversationId() + ".status", update);
+        // Mirrors this ack to the ACKING user's own other devices (not the
+        // sender's — the topic broadcast above already covers whoever sent
+        // the message) so a device sitting on the conversation list, not
+        // this specific thread, can still update its local unread badge live
+        // instead of only on next full re-fetch. Same convertAndSendToUser
+        // pattern already used for /chat.send's inbox fan-out.
+        if (principal != null) {
+            messagingTemplate.convertAndSendToUser(principal.getName(), "/queue/read-state", update);
+        }
     }
 
     /**
@@ -178,8 +255,10 @@ public class ChatController {
                 receipt.setUpdatedAt(Instant.now());
                 receiptRepository.save(receipt);
             }
-            messagingTemplate.convertAndSend("/topic/conversation." + request.conversationId() + ".receipts",
-                    new GroupReceiptUpdate(request.conversationId(), messageId, userId, receipt.getStatus().name()));
+            GroupReceiptUpdate receiptUpdate = new GroupReceiptUpdate(request.conversationId(), messageId, userId, receipt.getStatus().name());
+            messagingTemplate.convertAndSend("/topic/conversation." + request.conversationId() + ".receipts", receiptUpdate);
+            // Same cross-device mirroring as /chat.ack — see its comment.
+            messagingTemplate.convertAndSendToUser(userId, "/queue/read-state", receiptUpdate);
             messageRepository.findById(messageId).ifPresent(this::recomputeGroupAggregateStatus);
         }
     }
@@ -224,21 +303,66 @@ public class ChatController {
             message.setCiphertext(request.newCiphertext());
             message.setEdited(true);
             messageRepository.save(message);
-            MessageMutation mutation = new MessageMutation(request.conversationId(), request.messageId(), request.newCiphertext(), true, false);
+            MessageMutation mutation = new MessageMutation(request.conversationId(), request.messageId(), request.newCiphertext(), true, false, message.isPinned());
             messagingTemplate.convertAndSend("/topic/conversation." + request.conversationId() + ".mutations", mutation);
             pushMutationToInboxes(message, mutation);
         });
     }
 
+    /**
+     * Toggle a message's shared pin state — any participant, not just the
+     * sender (unlike /chat.edit), since pin is a per-conversation bookmark,
+     * not an authorship right. Mirrors /chat.edit's shape: load by id, flip
+     * the field, save, broadcast a mutation on the existing
+     * /topic/conversation.{id}.mutations channel and mirror it into
+     * /queue/mutations, reusing the already-built mutation pipeline rather
+     * than standing up a new one.
+     */
+    @MessageMapping("/chat.pin")
+    public void pin(MessagePinRequest request, Principal principal) {
+        if (principal == null) {
+            return;
+        }
+        messageRepository.findById(request.messageId()).ifPresent(message -> {
+            message.setPinned(request.pinned());
+            messageRepository.save(message);
+            MessageMutation mutation = new MessageMutation(request.conversationId(), request.messageId(),
+                    message.getCiphertext(), message.isEdited(), message.isDeleted(), message.isPinned());
+            messagingTemplate.convertAndSend("/topic/conversation." + request.conversationId() + ".mutations", mutation);
+            pushMutationToInboxes(message, mutation);
+        });
+    }
+
+    /**
+     * "EVERYONE" is sender-only and broadcasts to every other participant
+     * (unchanged from before this DTO gained scope). "ME" is available to
+     * ANY participant — including the recipient of someone else's message —
+     * writes a MessageDeletion row for the caller only, and is deliberately
+     * NEVER broadcast: it's invisible to everyone else by design. userId
+     * comes from the STOMP Principal, never the client payload, so one
+     * participant can't delete-for-me on another's behalf.
+     */
     @MessageMapping("/chat.delete")
     public void delete(MessageDeleteRequest request, Principal principal) {
+        if (principal == null) {
+            return;
+        }
         messageRepository.findById(request.messageId()).ifPresent(message -> {
-            if (principal == null || !principal.getName().equals(message.getSenderId())) {
+            if ("ME".equals(request.scope())) {
+                if (!messageDeletionRepository.existsByMessageIdAndUserId(request.messageId(), principal.getName())) {
+                    messageDeletionRepository.save(new MessageDeletion(request.messageId(), principal.getName(), Instant.now()));
+                }
+                return;
+            }
+            if (!principal.getName().equals(message.getSenderId())) {
                 return;
             }
             message.setDeleted(true);
             messageRepository.save(message);
-            MessageMutation mutation = new MessageMutation(request.conversationId(), request.messageId(), null, false, true);
+            // Now redundant — everyone loses the message anyway, so any
+            // earlier per-user delete-for-me markers for it serve no purpose.
+            messageDeletionRepository.deleteByMessageId(request.messageId());
+            MessageMutation mutation = new MessageMutation(request.conversationId(), request.messageId(), null, false, true, message.isPinned());
             messagingTemplate.convertAndSend("/topic/conversation." + request.conversationId() + ".mutations", mutation);
             pushMutationToInboxes(message, mutation);
         });

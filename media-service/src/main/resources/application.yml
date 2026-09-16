@@ -6,6 +6,10 @@ spring:
     name: media-service
 
 riskyc:
+  cors:
+    # The web chat client's origin(s), comma-separated — see WebConfig. Same
+    # default/key name as auth-service's own riskyc.cors.allowed-origins.
+    allowed-origins: ${RISKYC_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://167.86.120.214:8085}
   minio:
     endpoint: ${RISKYC_MINIO_ENDPOINT:http://localhost:9000}
     # Baked into presigned URLs — must be reachable from the mobile client,

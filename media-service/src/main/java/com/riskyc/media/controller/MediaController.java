@@ -19,6 +19,14 @@ import java.util.concurrent.TimeUnit;
  * directly to object storage instead of proxying bytes through this service.
  * Clients are expected to encrypt media before upload (see architecture notes
  * on end-to-end encryption) so MinIO only ever stores ciphertext.
+ *
+ * Documented MVP gap: this controller has NO authentication check of any
+ * kind today — not even bare JWT signature verification, let alone the
+ * session-revocation checks added to auth-service/messaging-service. Anyone
+ * who can reach this service can mint a presigned upload/download URL for
+ * any objectKey. This service is Postgres-free (MinIO-only), so wiring in
+ * JwtIssuer + the revocation checks the other two services now have would
+ * be a reasonable next step, not attempted in this pass.
  */
 @RestController
 @RequestMapping("/api/media")

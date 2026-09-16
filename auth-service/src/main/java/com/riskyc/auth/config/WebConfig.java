@@ -29,5 +29,21 @@ public class WebConfig implements WebMvcConfigurer {
                 .allowedMethods("GET", "POST", "OPTIONS")
                 .allowedHeaders("Content-Type", "Authorization")
                 .maxAge(3600);
+        // The web chat client also needs GET (profile lookups) and DELETE
+        // (account deletion) here, plus PUT for profile/identifier updates.
+        registry.addMapping("/api/users/**")
+                .allowedOrigins(allowedOrigins)
+                .allowedMethods("GET", "PUT", "DELETE", "POST", "OPTIONS")
+                .allowedHeaders("Content-Type", "Authorization")
+                .maxAge(3600);
+        // /internal/** is deliberately NOT mapped here — it's server-to-server
+        // traffic (messaging-service's RevokedJtiCache poller), protected by
+        // a shared secret instead (see SessionController), and should never
+        // be reachable from a browser at all.
+        registry.addMapping("/api/sessions/**")
+                .allowedOrigins(allowedOrigins)
+                .allowedMethods("GET", "DELETE", "OPTIONS")
+                .allowedHeaders("Content-Type", "Authorization")
+                .maxAge(3600);
     }
 }

@@ -1,6 +1,7 @@
 package com.riskyc.messaging.controller;
 
 import com.riskyc.common.security.JwtIssuer;
+import com.riskyc.messaging.security.RevokedJtiCache;
 import com.riskyc.messaging.dto.ConversationSummary;
 import com.riskyc.messaging.entity.GroupMember;
 import com.riskyc.messaging.repository.GroupMemberRepository;
@@ -35,12 +36,14 @@ public class ConversationController {
     private final MessageRepository messageRepository;
     private final GroupMemberRepository groupMemberRepository;
     private final JwtIssuer jwtIssuer;
+    private final RevokedJtiCache revokedJtiCache;
 
     public ConversationController(MessageRepository messageRepository, GroupMemberRepository groupMemberRepository,
-                                   JwtIssuer jwtIssuer) {
+                                   JwtIssuer jwtIssuer, RevokedJtiCache revokedJtiCache) {
         this.messageRepository = messageRepository;
         this.groupMemberRepository = groupMemberRepository;
         this.jwtIssuer = jwtIssuer;
+        this.revokedJtiCache = revokedJtiCache;
     }
 
     @GetMapping
@@ -67,7 +70,13 @@ public class ConversationController {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Missing bearer token");
         }
         try {
-            return jwtIssuer.verifyAndGetSubject(authorization.substring("Bearer ".length()));
+            JwtIssuer.JwtClaims claims = jwtIssuer.verifyAndGetClaims(authorization.substring("Bearer ".length()));
+            if (revokedJtiCache.isRevoked(claims.jti())) {
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Session has been signed out");
+            }
+            return claims.subject();
+        } catch (ResponseStatusException e) {
+            throw e;
         } catch (RuntimeException e) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid token");
         }

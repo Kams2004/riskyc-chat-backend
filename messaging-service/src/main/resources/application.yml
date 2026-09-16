@@ -20,3 +20,14 @@ spring:
 riskyc:
   jwt:
     secret: ${RISKYC_JWT_SECRET:ZmFrZS1kZXYtc2VjcmV0LWRvLW5vdC11c2UtaW4tcHJvZC1wbGVhc2UtY2hhbmdlLW1l}
+  cors:
+    # The web chat client's origin(s), comma-separated — see WebConfig. Same
+    # default/key name as auth-service's own riskyc.cors.allowed-origins.
+    allowed-origins: ${RISKYC_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://167.86.120.214:8085}
+  auth-service:
+    # Reached over the internal docker network by service name, not the
+    # public host-mapped port — see RevokedJtiCache.
+    internal-url: ${RISKYC_AUTH_SERVICE_INTERNAL_URL:http://auth-service:8081}
+  internal:
+    # Same shared secret as auth-service's riskyc.internal.api-key — must match.
+    api-key: ${RISKYC_INTERNAL_API_KEY:}

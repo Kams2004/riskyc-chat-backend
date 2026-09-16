@@ -1,4 +1,5 @@
 package com.riskyc.messaging.dto;
 
-public record MessageDeleteRequest(String conversationId, String messageId) {
+/** {@code scope} is "EVERYONE" (sender-only, broadcast) or "ME" (any participant, never broadcast) — see ChatController#delete. */
+public record MessageDeleteRequest(String conversationId, String messageId, String scope) {
 }

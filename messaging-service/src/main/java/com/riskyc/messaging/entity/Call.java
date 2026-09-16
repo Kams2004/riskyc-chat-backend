@@ -48,6 +48,19 @@ public class Call {
     @Column(name = "ended_at")
     private Instant endedAt;
 
+    // Set at invite time, cleared once answered/ended — lets a notification
+    // tap fetch a fresh offer via GET /api/calls/{id} without putting the SDP
+    // itself in the push payload (size limits, and it'd go stale if the
+    // caller's ICE gathering produces a different offer before the callee
+    // actually taps Answer).
+    @Column(name = "sdp_offer", columnDefinition = "text")
+    private String sdpOffer;
+
+    // Same "client-supplied, display-only" caveat as CallInvite#callerName —
+    // messaging-service has no User table of its own to resolve this itself.
+    @Column(name = "caller_name")
+    private String callerName;
+
     protected Call() {
         // JPA
     }
@@ -108,5 +121,21 @@ public class Call {
     /** Whoever didn't place the call. */
     public String otherParty(String userId) {
         return userId.equals(callerId) ? calleeId : callerId;
+    }
+
+    public String getSdpOffer() {
+        return sdpOffer;
+    }
+
+    public void setSdpOffer(String sdpOffer) {
+        this.sdpOffer = sdpOffer;
+    }
+
+    public String getCallerName() {
+        return callerName;
+    }
+
+    public void setCallerName(String callerName) {
+        this.callerName = callerName;
     }
 }

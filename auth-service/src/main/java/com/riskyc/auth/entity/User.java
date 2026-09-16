@@ -73,8 +73,20 @@ public class User {
         return phoneNumber;
     }
 
+    // Identifiers are otherwise immutable post-creation (only the withX
+    // factories set them) — these exist solely for UserController's
+    // change-identifier flow, which only calls them after the NEW value has
+    // already passed OTP verification.
+    public void setPhoneNumber(String phoneNumber) {
+        this.phoneNumber = phoneNumber;
+    }
+
     public String getEmail() {
         return email;
+    }
+
+    public void setEmail(String email) {
+        this.email = email;
     }
 
     public String getDisplayName() {

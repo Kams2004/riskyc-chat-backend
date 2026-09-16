@@ -1,6 +1,7 @@
 package com.riskyc.messaging.config;
 
 import com.riskyc.common.security.JwtIssuer;
+import com.riskyc.messaging.security.RevokedJtiCache;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
@@ -19,9 +20,11 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     private final JwtIssuer jwtIssuer;
+    private final RevokedJtiCache revokedJtiCache;
 
-    public WebSocketConfig(JwtIssuer jwtIssuer) {
+    public WebSocketConfig(JwtIssuer jwtIssuer, RevokedJtiCache revokedJtiCache) {
         this.jwtIssuer = jwtIssuer;
+        this.revokedJtiCache = revokedJtiCache;
     }
 
     @Override
@@ -34,7 +37,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         // ChatController needs to push straight to a specific recipient.
         registry.addEndpoint("/ws")
                 .setAllowedOriginPatterns("*")
-                .addInterceptors(new WebSocketAuthInterceptor(jwtIssuer))
+                .addInterceptors(new WebSocketAuthInterceptor(jwtIssuer, revokedJtiCache))
                 .setHandshakeHandler(new UserHandshakeHandler());
     }
 

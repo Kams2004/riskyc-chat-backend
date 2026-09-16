@@ -11,6 +11,21 @@ import java.util.List;
 public interface MessageRepository extends JpaRepository<Message, String> {
     List<Message> findByConversationIdOrderBySentAtAsc(String conversationId);
 
+    List<Message> findByConversationIdAndMediaTypeInAndDeletedFalseOrderBySentAtDesc(String conversationId,
+                                                                                       List<Message.MediaType> mediaTypes);
+
+    /**
+     * ILIKE, not a tsvector/full-text index — this app has no message-search
+     * volume yet to justify one, and ciphertext is still plaintext today (no
+     * E2E encryption implemented yet, see MessageEnvelope's own doc comment)
+     * so a plain substring match is viable. Scoped to one conversationId,
+     * never a global search, so the caller's own membership check is enough
+     * authorization (see MessageHistoryController#search).
+     */
+    @Query("SELECT m FROM Message m WHERE m.conversationId = :conversationId AND m.deleted = false " +
+            "AND m.ciphertext ILIKE CONCAT('%', :query, '%') ORDER BY m.sentAt DESC")
+    List<Message> searchInConversation(@Param("conversationId") String conversationId, @Param("query") String query);
+
     interface OneToOneSummaryRow {
         String getConversationId();
         String getOtherUserId();

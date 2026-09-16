@@ -1,6 +1,7 @@
 package com.riskyc.messaging.config;
 
 import com.riskyc.common.security.JwtIssuer;
+import com.riskyc.messaging.security.RevokedJtiCache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.server.ServerHttpRequest;
@@ -25,9 +26,11 @@ public class WebSocketAuthInterceptor implements HandshakeInterceptor {
     private static final Logger log = LoggerFactory.getLogger(WebSocketAuthInterceptor.class);
 
     private final JwtIssuer jwtIssuer;
+    private final RevokedJtiCache revokedJtiCache;
 
-    public WebSocketAuthInterceptor(JwtIssuer jwtIssuer) {
+    public WebSocketAuthInterceptor(JwtIssuer jwtIssuer, RevokedJtiCache revokedJtiCache) {
         this.jwtIssuer = jwtIssuer;
+        this.revokedJtiCache = revokedJtiCache;
     }
 
     @Override
@@ -36,7 +39,17 @@ public class WebSocketAuthInterceptor implements HandshakeInterceptor {
         String token = UriComponentsBuilder.fromUri(request.getURI()).build().getQueryParams().getFirst("token");
         if (token != null) {
             try {
-                attributes.put("userId", jwtIssuer.verifyAndGetSubject(token));
+                JwtIssuer.JwtClaims claims = jwtIssuer.verifyAndGetClaims(token);
+                // The most consequential of all the revocation checks in this
+                // service — this gates the live socket a signed-out device
+                // would otherwise keep using for messages/calls indefinitely
+                // (up to the JWT's 30-day natural expiry) even after "sign
+                // out this device" was used elsewhere.
+                if (!revokedJtiCache.isRevoked(claims.jti())) {
+                    attributes.put("userId", claims.subject());
+                } else {
+                    log.debug("Rejected revoked WS session token, continuing handshake anonymously");
+                }
             } catch (RuntimeException e) {
                 log.debug("Rejected invalid WS token, continuing handshake anonymously", e);
             }

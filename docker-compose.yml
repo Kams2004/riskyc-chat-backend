@@ -76,6 +76,7 @@ services:
       RISKYC_BIRD_API_BASE_URL: ${RISKYC_BIRD_API_BASE_URL:-https://us1.platform.bird.com}
       RISKYC_SMS_SENDER: ${RISKYC_SMS_SENDER:-RiskyC}
       RISKYC_CORS_ALLOWED_ORIGINS: ${RISKYC_CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://167.86.120.214:8085}
+      RISKYC_INTERNAL_API_KEY: ${RISKYC_INTERNAL_API_KEY:-}
     depends_on:
       - postgres
 
@@ -89,6 +90,9 @@ services:
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/riskyc
       SPRING_DATA_REDIS_HOST: redis
+      RISKYC_CORS_ALLOWED_ORIGINS: ${RISKYC_CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://167.86.120.214:8085}
+      RISKYC_INTERNAL_API_KEY: ${RISKYC_INTERNAL_API_KEY:-}
+      RISKYC_AUTH_SERVICE_INTERNAL_URL: ${RISKYC_AUTH_SERVICE_INTERNAL_URL:-http://auth-service:8081}
     depends_on:
       - postgres
       - redis
@@ -102,6 +106,7 @@ services:
     environment:
       RISKYC_MINIO_ENDPOINT: http://minio:9000
       RISKYC_MINIO_PUBLIC_ENDPOINT: ${RISKYC_MINIO_PUBLIC_ENDPOINT:-http://localhost:9000}
+      RISKYC_CORS_ALLOWED_ORIGINS: ${RISKYC_CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://167.86.120.214:8085}
     depends_on:
       - minio
 
@@ -113,6 +118,7 @@ services:
       - "${PRESENCE_SERVICE_HOST_PORT:-8084}:8084"
     environment:
       SPRING_DATA_REDIS_HOST: redis
+      RISKYC_CORS_ALLOWED_ORIGINS: ${RISKYC_CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://167.86.120.214:8085}
     depends_on:
       - redis
 

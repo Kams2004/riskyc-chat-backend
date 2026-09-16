@@ -38,12 +38,25 @@ public class PushNotificationService {
     }
 
     public void sendToUser(String userId, String title, String body, String channelId, Map<String, Object> data) {
+        sendToUser(userId, title, body, channelId, data, null);
+    }
+
+    /**
+     * categoryId is what makes Expo/APNs/FCM actually render interactive
+     * action buttons (e.g. Answer/Decline) on the notification itself — see
+     * mobile's usePushNotifications.ts#ensureCallCategory, which registers a
+     * category of the same identifier client-side. Null for every
+     * notification type except an incoming call.
+     */
+    public void sendToUser(String userId, String title, String body, String channelId, Map<String, Object> data,
+                            String categoryId) {
         for (PushToken pushToken : pushTokenRepository.findByUserId(userId)) {
-            send(pushToken.getToken(), title, body, channelId, data);
+            send(pushToken.getToken(), title, body, channelId, data, categoryId);
         }
     }
 
-    private void send(String expoPushToken, String title, String body, String channelId, Map<String, Object> data) {
+    private void send(String expoPushToken, String title, String body, String channelId, Map<String, Object> data,
+                       String categoryId) {
         try {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("to", expoPushToken);
@@ -53,6 +66,9 @@ public class PushNotificationService {
             payload.put("channelId", channelId);
             payload.put("data", data);
             payload.put("priority", "high");
+            if (categoryId != null) {
+                payload.put("categoryId", categoryId);
+            }
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(EXPO_PUSH_URL)

@@ -1,6 +1,7 @@
 package com.riskyc.messaging.controller;
 
 import com.riskyc.common.security.JwtIssuer;
+import com.riskyc.messaging.security.RevokedJtiCache;
 import com.riskyc.messaging.entity.PushToken;
 import com.riskyc.messaging.repository.PushTokenRepository;
 import org.springframework.http.HttpStatus;
@@ -20,10 +21,12 @@ public class PushTokenController {
 
     private final PushTokenRepository pushTokenRepository;
     private final JwtIssuer jwtIssuer;
+    private final RevokedJtiCache revokedJtiCache;
 
-    public PushTokenController(PushTokenRepository pushTokenRepository, JwtIssuer jwtIssuer) {
+    public PushTokenController(PushTokenRepository pushTokenRepository, JwtIssuer jwtIssuer, RevokedJtiCache revokedJtiCache) {
         this.pushTokenRepository = pushTokenRepository;
         this.jwtIssuer = jwtIssuer;
+        this.revokedJtiCache = revokedJtiCache;
     }
 
     public record RegisterRequest(String token, String platform) {
@@ -48,7 +51,13 @@ public class PushTokenController {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Missing bearer token");
         }
         try {
-            return jwtIssuer.verifyAndGetSubject(authorization.substring("Bearer ".length()));
+            JwtIssuer.JwtClaims claims = jwtIssuer.verifyAndGetClaims(authorization.substring("Bearer ".length()));
+            if (revokedJtiCache.isRevoked(claims.jti())) {
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Session has been signed out");
+            }
+            return claims.subject();
+        } catch (ResponseStatusException e) {
+            throw e;
         } catch (RuntimeException e) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid token");
         }

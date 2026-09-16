@@ -33,6 +33,12 @@ public class GroupConversation {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    // WhatsApp's "announcement group" pattern — when true, only ADMIN
+    // members may send; ChatController.send() enforces it server-side as
+    // defense-in-depth behind the client composer gate.
+    @Column(name = "only_admins_can_message", nullable = false, columnDefinition = "boolean not null default false")
+    private boolean onlyAdminsCanMessage = false;
+
     protected GroupConversation() {
         // JPA
     }
@@ -70,5 +76,13 @@ public class GroupConversation {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public boolean isOnlyAdminsCanMessage() {
+        return onlyAdminsCanMessage;
+    }
+
+    public void setOnlyAdminsCanMessage(boolean onlyAdminsCanMessage) {
+        this.onlyAdminsCanMessage = onlyAdminsCanMessage;
     }
 }

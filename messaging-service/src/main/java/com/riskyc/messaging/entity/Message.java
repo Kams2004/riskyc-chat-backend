@@ -18,7 +18,11 @@ public class Message {
 
     public enum DeliveryStatus { SENT, DELIVERED, READ }
 
-    public enum MediaType { IMAGE, FILE, AUDIO, CALL }
+    // Stored via @Enumerated(EnumType.STRING) below (a varchar column, not a
+    // native Postgres enum type) — adding VIDEO is a zero-migration change.
+    // Was missing entirely until now despite ChatController.previewFor
+    // already having a dead "VIDEO" case that could never actually fire.
+    public enum MediaType { IMAGE, VIDEO, FILE, AUDIO, CALL }
 
     @Id
     @Column(name = "message_id")
@@ -73,12 +77,50 @@ public class Message {
     @Column(name = "deleted", nullable = false)
     private boolean deleted = false;
 
+    // Marker only — WhatsApp-style "Forwarded" label, no back-reference to
+    // the original message. Deliberately no forwardedFromMessageId: deleting
+    // the original (delete-for-everyone) must never orphan a FK on a
+    // message that was forwarded from it.
+    //
+    // columnDefinition spells out an explicit default: ddl-auto=update's
+    // plain "ADD COLUMN forwarded boolean not null" (no default) fails
+    // outright against a table that already has rows ("column contains
+    // null values") since Postgres has nothing to backfill existing rows
+    // with — this is what actually breaks a NOT NULL column added to an
+    // already-populated table, not a hypothetical.
+    @Column(name = "forwarded", nullable = false, columnDefinition = "boolean not null default false")
+    private boolean forwarded = false;
+
     // Null for a 1:1 message. When set, this message belongs to a group
     // conversation — recipientId is unused in that case (there's no single
     // recipient), left populated with the groupId itself as a harmless
     // placeholder rather than relaxing recipientId's NOT NULL constraint.
     @Column(name = "group_id")
     private String groupId;
+
+    // All four null for a message that isn't a reply. Generated client-side
+    // at send time from the sender's own locally-rendered content, not
+    // re-derived server-side — this is what lets "reply privately" work:
+    // that reply lands in a DIFFERENT conversation than the original
+    // message, so the recipient's client needs enough context to render the
+    // quote without a local join.
+    @Column(name = "reply_to_message_id")
+    private String replyToMessageId;
+
+    @Column(name = "reply_to_conversation_id")
+    private String replyToConversationId;
+
+    @Column(name = "reply_to_sender_id")
+    private String replyToSenderId;
+
+    @Column(name = "reply_to_snippet")
+    private String replyToSnippet;
+
+    // Shared, per-conversation pin — any participant can toggle it, no admin
+    // gate, no expiry. Deliberately a smaller subset of WhatsApp's real pin
+    // system (single pin surfaced via one banner, not a whole pinned list).
+    @Column(name = "pinned", nullable = false, columnDefinition = "boolean not null default false")
+    private boolean pinned = false;
 
     protected Message() {
         // JPA
@@ -178,11 +220,59 @@ public class Message {
         this.deleted = deleted;
     }
 
+    public boolean isForwarded() {
+        return forwarded;
+    }
+
+    public void setForwarded(boolean forwarded) {
+        this.forwarded = forwarded;
+    }
+
     public String getGroupId() {
         return groupId;
     }
 
     public void setGroupId(String groupId) {
         this.groupId = groupId;
+    }
+
+    public String getReplyToMessageId() {
+        return replyToMessageId;
+    }
+
+    public void setReplyToMessageId(String replyToMessageId) {
+        this.replyToMessageId = replyToMessageId;
+    }
+
+    public String getReplyToConversationId() {
+        return replyToConversationId;
+    }
+
+    public void setReplyToConversationId(String replyToConversationId) {
+        this.replyToConversationId = replyToConversationId;
+    }
+
+    public String getReplyToSenderId() {
+        return replyToSenderId;
+    }
+
+    public void setReplyToSenderId(String replyToSenderId) {
+        this.replyToSenderId = replyToSenderId;
+    }
+
+    public String getReplyToSnippet() {
+        return replyToSnippet;
+    }
+
+    public void setReplyToSnippet(String replyToSnippet) {
+        this.replyToSnippet = replyToSnippet;
+    }
+
+    public boolean isPinned() {
+        return pinned;
+    }
+
+    public void setPinned(boolean pinned) {
+        this.pinned = pinned;
     }
 }

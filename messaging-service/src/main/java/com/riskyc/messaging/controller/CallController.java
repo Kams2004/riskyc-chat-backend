@@ -1,6 +1,8 @@
 package com.riskyc.messaging.controller;
 
 import com.riskyc.common.dto.MessageEnvelope;
+import com.riskyc.common.security.JwtIssuer;
+import com.riskyc.messaging.security.RevokedJtiCache;
 import com.riskyc.messaging.dto.CallAnswer;
 import com.riskyc.messaging.dto.CallEnd;
 import com.riskyc.messaging.dto.CallIceCandidate;
@@ -10,9 +12,15 @@ import com.riskyc.messaging.entity.Message;
 import com.riskyc.messaging.repository.CallRepository;
 import com.riskyc.messaging.repository.MessageRepository;
 import com.riskyc.messaging.service.PushNotificationService;
+import org.springframework.http.HttpStatus;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.security.Principal;
 import java.time.Duration;
@@ -39,13 +47,18 @@ public class CallController {
     private final MessageRepository messageRepository;
     private final SimpMessagingTemplate messagingTemplate;
     private final PushNotificationService pushNotificationService;
+    private final JwtIssuer jwtIssuer;
+    private final RevokedJtiCache revokedJtiCache;
 
     public CallController(CallRepository callRepository, MessageRepository messageRepository,
-                           SimpMessagingTemplate messagingTemplate, PushNotificationService pushNotificationService) {
+                           SimpMessagingTemplate messagingTemplate, PushNotificationService pushNotificationService,
+                           JwtIssuer jwtIssuer, RevokedJtiCache revokedJtiCache) {
         this.callRepository = callRepository;
         this.messageRepository = messageRepository;
         this.messagingTemplate = messagingTemplate;
         this.pushNotificationService = pushNotificationService;
+        this.jwtIssuer = jwtIssuer;
+        this.revokedJtiCache = revokedJtiCache;
     }
 
     @MessageMapping("/call.invite")
@@ -56,16 +69,73 @@ public class CallController {
         String fromUserId = principal.getName();
         String callId = inbound.callId() != null ? inbound.callId() : UUID.randomUUID().toString();
         Call call = new Call(callId, fromUserId, inbound.toUserId(), Call.CallType.valueOf(inbound.type()), Instant.now());
+        // Persisted so a notification tap can fetch a fresh offer via GET
+        // /api/calls/{id} instead of relying on the (size-limited, possibly
+        // stale-by-the-time-it's-tapped) push payload to carry it.
+        call.setSdpOffer(inbound.sdpOffer());
+        call.setCallerName(inbound.callerName());
         callRepository.save(call);
 
-        CallInvite outbound = new CallInvite(callId, fromUserId, inbound.toUserId(), inbound.type(), inbound.sdpOffer());
+        CallInvite outbound = new CallInvite(callId, fromUserId, inbound.toUserId(), inbound.type(), inbound.sdpOffer(),
+                inbound.callerName());
         messagingTemplate.convertAndSendToUser(inbound.toUserId(), "/queue/calls", outbound, headersFor("invite"));
 
+        // fromUserId/callerName/callType let a notification action (Answer/
+        // Decline) resolve and act on this call without first opening the
+        // app and waiting for the live STOMP invite to (re)arrive.
         Map<String, Object> pushData = new LinkedHashMap<>();
         pushData.put("type", "call");
         pushData.put("callId", callId);
-        String title = "VIDEO".equals(inbound.type()) ? "Incoming video call" : "Incoming voice call";
-        pushNotificationService.sendToUser(inbound.toUserId(), title, "RiskyC Chat", "calls", pushData);
+        pushData.put("fromUserId", fromUserId);
+        pushData.put("callerName", inbound.callerName());
+        pushData.put("callType", inbound.type());
+        String callerLabel = inbound.callerName() != null && !inbound.callerName().isBlank() ? inbound.callerName() : "Someone";
+        String callKind = "VIDEO".equals(inbound.type()) ? "video call" : "voice call";
+        pushNotificationService.sendToUser(inbound.toUserId(), callerLabel, "Incoming " + callKind, "calls", pushData,
+                "incoming_call");
+    }
+
+    /**
+     * What a notification Answer/Decline action fetches the instant it's
+     * tapped — deliberately minimal (no full Call history), and only
+     * available while still RINGING so a stale/already-handled notification
+     * can't be used to rejoin a call that moved on without this device.
+     */
+    @GetMapping("/api/calls/{callId}")
+    @ResponseBody
+    public CallSnapshot getCall(@PathVariable String callId,
+                                 @RequestHeader(value = "Authorization", required = false) String authorization) {
+        String callerId = callerIdFrom(authorization);
+        Call call = callRepository.findById(callId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such call"));
+        if (!callerId.equals(call.getCallerId()) && !callerId.equals(call.getCalleeId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not a participant in this call");
+        }
+        if (call.getStatus() != Call.CallStatus.RINGING) {
+            throw new ResponseStatusException(HttpStatus.GONE, "Call is no longer ringing");
+        }
+        return new CallSnapshot(call.getId(), call.getCallerId(), call.getCallerName(), call.getType().name(),
+                call.getSdpOffer());
+    }
+
+    public record CallSnapshot(String callId, String fromUserId, String callerName, String type, String sdpOffer) {
+    }
+
+    private String callerIdFrom(String authorization) {
+        if (authorization == null || !authorization.startsWith("Bearer ")) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Missing bearer token");
+        }
+        try {
+            JwtIssuer.JwtClaims claims = jwtIssuer.verifyAndGetClaims(authorization.substring("Bearer ".length()));
+            if (revokedJtiCache.isRevoked(claims.jti())) {
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Session has been signed out");
+            }
+            return claims.subject();
+        } catch (ResponseStatusException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid token");
+        }
     }
 
     @MessageMapping("/call.answer")
@@ -150,7 +220,8 @@ public class CallController {
 
         MessageEnvelope envelope = new MessageEnvelope(callLog.getMessageId(), conversationId, call.getCallerId(),
                 call.getCalleeId(), callLog.getCiphertext(), callLog.getSentAt(), callLog.getStatus().name(),
-                "CALL", null, callLog.getMediaFileName(), callLog.getMediaDurationMs(), false, false, null);
+                "CALL", null, callLog.getMediaFileName(), callLog.getMediaDurationMs(), false, false, null, false,
+                java.util.List.of(), null, null, null, null, false);
         messagingTemplate.convertAndSend("/topic/conversation." + conversationId, envelope);
         messagingTemplate.convertAndSendToUser(call.getCallerId(), "/queue/messages", envelope);
         messagingTemplate.convertAndSendToUser(call.getCalleeId(), "/queue/messages", envelope);
