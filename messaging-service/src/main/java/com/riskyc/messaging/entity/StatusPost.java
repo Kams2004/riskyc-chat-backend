@@ -17,7 +17,13 @@ import java.time.Instant;
  * immediately, and StatusCleanupJob hard-deletes past it. mediaObjectKey
  * points at MinIO (same presigned-upload pipeline as message attachments)
  * and is null for a text-only status, which instead uses textContent +
- * backgroundColor.
+ * backgroundColor. overlayJson is an opaque client-authored JSON blob
+ * (freehand drawing strokes + an optional text-overlay label drawn on top
+ * of the media) — stored and echoed back as-is, never parsed or validated
+ * server-side, same "server doesn't understand it, just carries it" role as
+ * ciphertext on a Message. Composited onto the media at VIEW time on the
+ * client (an SVG overlay, not baked into the image's own pixels), so this
+ * is always null for a TEXT-mediaType status, which needs no overlay.
  */
 @Entity
 @Table(name = "status_post", indexes = {
@@ -47,6 +53,9 @@ public class StatusPost {
     @Column(name = "background_color")
     private String backgroundColor;
 
+    @Column(name = "overlay_json", columnDefinition = "text")
+    private String overlayJson;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -58,13 +67,14 @@ public class StatusPost {
     }
 
     public StatusPost(String statusId, String userId, MediaType mediaType, String mediaObjectKey,
-                       String textContent, String backgroundColor, Instant createdAt, Instant expiresAt) {
+                       String textContent, String backgroundColor, String overlayJson, Instant createdAt, Instant expiresAt) {
         this.statusId = statusId;
         this.userId = userId;
         this.mediaType = mediaType;
         this.mediaObjectKey = mediaObjectKey;
         this.textContent = textContent;
         this.backgroundColor = backgroundColor;
+        this.overlayJson = overlayJson;
         this.createdAt = createdAt;
         this.expiresAt = expiresAt;
     }
@@ -91,6 +101,10 @@ public class StatusPost {
 
     public String getBackgroundColor() {
         return backgroundColor;
+    }
+
+    public String getOverlayJson() {
+        return overlayJson;
     }
 
     public Instant getCreatedAt() {

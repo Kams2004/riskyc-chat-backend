@@ -71,12 +71,12 @@ public class StatusController {
     }
 
     public record CreateStatusRequest(StatusPost.MediaType mediaType, String mediaObjectKey, String textContent,
-                                       String backgroundColor) {
+                                       String backgroundColor, String overlayJson) {
     }
 
     public record StatusItem(String statusId, String userId, StatusPost.MediaType mediaType, String mediaObjectKey,
-                              String textContent, String backgroundColor, String createdAt, String expiresAt,
-                              boolean viewedByMe) {
+                              String textContent, String backgroundColor, String overlayJson, String createdAt,
+                              String expiresAt, boolean viewedByMe) {
     }
 
     public record StatusFeedEntry(String userId, List<StatusItem> statuses, boolean hasUnviewed) {
@@ -98,7 +98,7 @@ public class StatusController {
 
         Instant now = Instant.now();
         StatusPost post = new StatusPost(UUID.randomUUID().toString(), userId, request.mediaType(),
-                request.mediaObjectKey(), request.textContent(), request.backgroundColor(), now,
+                request.mediaObjectKey(), request.textContent(), request.backgroundColor(), request.overlayJson(), now,
                 now.plus(STATUS_TTL_HOURS, ChronoUnit.HOURS));
         statusPostRepository.save(post);
 
@@ -207,7 +207,7 @@ public class StatusController {
 
     private StatusItem toItem(StatusPost post, boolean viewedByMe) {
         return new StatusItem(post.getStatusId(), post.getUserId(), post.getMediaType(), post.getMediaObjectKey(),
-                post.getTextContent(), post.getBackgroundColor(), post.getCreatedAt().toString(),
+                post.getTextContent(), post.getBackgroundColor(), post.getOverlayJson(), post.getCreatedAt().toString(),
                 post.getExpiresAt().toString(), viewedByMe);
     }
 
