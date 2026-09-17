@@ -100,6 +100,21 @@ public class ConversationController {
         return summaries;
     }
 
+    public record ConversationSettingsResult(boolean muted, Integer disappearingMessageSeconds) {
+    }
+
+    /** Single-conversation counterpart to list()'s bulk sync — the thread screen's own initial fetch for mute/disappearing state, rather than searching the whole list for one entry. */
+    @GetMapping("/{conversationId}/settings")
+    public ConversationSettingsResult settings(@PathVariable String conversationId,
+                                                @RequestHeader(value = "Authorization", required = false) String authorization) {
+        String userId = callerIdFrom(authorization);
+        boolean muted = mutedConversationRepository.existsByUserIdAndConversationId(userId, conversationId);
+        Integer seconds = disappearingMessageSettingsRepository.findById(conversationId)
+                .map(DisappearingMessageSettings::getDurationSeconds)
+                .orElse(null);
+        return new ConversationSettingsResult(muted, seconds);
+    }
+
     public record MuteRequest(boolean muted) {
     }
 
