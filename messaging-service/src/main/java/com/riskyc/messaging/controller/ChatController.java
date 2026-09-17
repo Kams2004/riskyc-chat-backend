@@ -197,18 +197,38 @@ public class ChatController {
     }
 
     /**
-     * Ephemeral — no persistence, just a relay to whoever currently has this
-     * thread open (works identically for 1:1 and group). userId comes from
-     * the STOMP Principal, never the client payload, so one user can't fake
-     * another's typing state.
+     * Ephemeral — no persistence. Two deliveries: the per-conversation topic
+     * (whoever currently has this exact thread open) AND each recipient's
+     * personal /queue/typing (so the chat LIST can show "typing…" even when
+     * that thread isn't the open screen — mirrors how /queue/messages
+     * already does this for new messages). userId comes from the STOMP
+     * Principal, never the client payload, so one user can't fake another's
+     * typing state.
      */
     @MessageMapping("/chat.typing")
     public void typing(TypingIndicator inbound, Principal principal) {
         if (principal == null) {
             return;
         }
-        TypingUpdate update = new TypingUpdate(inbound.conversationId(), principal.getName(), inbound.isTyping());
+        String senderId = principal.getName();
+        TypingUpdate update = new TypingUpdate(inbound.conversationId(), senderId, inbound.isTyping());
         messagingTemplate.convertAndSend("/topic/conversation." + inbound.conversationId() + ".typing", update);
+
+        if (!groupMemberRepository.findByGroupId(inbound.conversationId()).isEmpty()) {
+            for (String memberId : otherMemberIds(inbound.conversationId(), senderId)) {
+                messagingTemplate.convertAndSendToUser(memberId, "/queue/typing", update);
+            }
+            return;
+        }
+
+        // Not a group — a 1:1 conversationId is the two user ids, sorted and
+        // joined with '_' (see mobile/web's conversationIdFor), so the other
+        // party is whichever half isn't the sender.
+        String[] parts = inbound.conversationId().split("_", 2);
+        if (parts.length == 2) {
+            String otherUserId = parts[0].equals(senderId) ? parts[1] : parts[0];
+            messagingTemplate.convertAndSendToUser(otherUserId, "/queue/typing", update);
+        }
     }
 
     @MessageMapping("/chat.ack")

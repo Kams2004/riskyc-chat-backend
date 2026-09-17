@@ -67,7 +67,7 @@ public class UserController {
     public record UserResult(String userId, String displayName, String email, String phoneNumber, String avatarObjectKey) {
     }
 
-    public record UpdateProfileRequest(String displayName, String avatarObjectKey) {
+    public record UpdateProfileRequest(String displayName, String avatarObjectKey, String phoneNumber) {
     }
 
     public record IdentifierChangeRequest(String newPhoneNumber, String newEmail) {
@@ -81,6 +81,25 @@ public class UserController {
     }
 
     public record MatchContactsRequest(List<String> phoneNumbers, List<String> emails) {
+    }
+
+    public record LookupByPhoneRequest(String phoneNumber) {
+    }
+
+    /** 200 with the account if the number is registered, 404 otherwise. Used by the mobile
+     * "new conversation" screen when the user types a number not in their device contacts. */
+    @PostMapping("/api/users/lookup-by-phone")
+    public ResponseEntity<UserResult> lookupByPhone(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody LookupByPhoneRequest request) {
+        UUID callerId = callerIdFrom(authorization);
+        if (request.phoneNumber() == null || request.phoneNumber().isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+        return userRepository.findByPhoneNumber(request.phoneNumber().trim())
+                .filter(u -> !u.getId().equals(callerId))
+                .map(u -> ResponseEntity.ok(toResult(u)))
+                .orElse(ResponseEntity.notFound().build());
     }
 
     /**
@@ -138,6 +157,16 @@ public class UserController {
         }
         if (request.avatarObjectKey() != null) {
             user.setAvatarObjectKey(request.avatarObjectKey());
+        }
+        if (request.phoneNumber() != null && !request.phoneNumber().isBlank()) {
+            // Only set if the account doesn't already have a phone number
+            // (this is the onboarding path for email-registered users).
+            if (user.getPhoneNumber() == null || user.getPhoneNumber().isBlank()) {
+                if (userRepository.existsByPhoneNumber(request.phoneNumber().trim())) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT, "Phone number already in use");
+                }
+                user.setPhoneNumber(request.phoneNumber().trim());
+            }
         }
         userRepository.save(user);
         return toResult(user);
