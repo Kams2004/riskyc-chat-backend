@@ -128,7 +128,8 @@ public class GroupCallController {
         MessageEnvelope envelope = new MessageEnvelope(callLog.getMessageId(), request.groupId(), nominalSenderId,
                 request.groupId(), callLog.getCiphertext(), callLog.getSentAt(), callLog.getStatus().name(),
                 "CALL", null, callLog.getMediaFileName(), callLog.getMediaDurationMs(), false, false,
-                request.groupId(), false, List.of(), null, null, null, null, false, request.participantIds().size());
+                request.groupId(), false, List.of(), null, null, null, null, false, request.participantIds().size(),
+                null, null);
 
         messagingTemplate.convertAndSend("/topic/conversation." + request.groupId(), envelope);
         for (String memberId : actualMemberIds) {

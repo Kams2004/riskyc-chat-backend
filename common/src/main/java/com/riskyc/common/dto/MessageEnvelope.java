@@ -37,6 +37,19 @@ public record MessageEnvelope(
         String replyToSnippet,
         boolean pinned,
         /** Only set on a group-call log entry — see Message.java's own field comment. */
-        Integer mediaParticipantCount
+        Integer mediaParticipantCount,
+        /**
+         * Client-supplied at send time (the sender already knows their own
+         * current display name from AuthContext) — used as the push
+         * notification's title for a 1:1 message instead of a generic
+         * "RiskyC Chat", without messaging-service needing to call back into
+         * auth-service just to resolve it. Null-safe: falls back to the
+         * generic title wherever it's used. Not persisted on Message itself
+         * (a display name can change after the fact; this is a delivery-time
+         * label, not part of the message's own record).
+         */
+        String senderDisplayName,
+        /** Null for a normal message. Set when the conversation had disappearing messages enabled at send time — see Message.java's own field comment. */
+        Instant expiresAt
 ) {
 }

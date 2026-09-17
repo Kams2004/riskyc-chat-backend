@@ -2,8 +2,10 @@ package com.riskyc.messaging.repository;
 
 import com.riskyc.messaging.entity.Message;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
@@ -52,4 +54,10 @@ public interface MessageRepository extends JpaRepository<Message, String> {
 
     @Query("SELECT MAX(m.sentAt) FROM Message m WHERE m.groupId = :groupId")
     Instant findLastMessageAtForGroup(@Param("groupId") String groupId);
+
+    /** Feeds DisappearingMessageCleanupJob's periodic hard-delete sweep. History reads already filter these out themselves in the meantime — see MessageHistoryController#history. */
+    @Modifying
+    @Transactional
+    @Query("DELETE FROM Message m WHERE m.expiresAt IS NOT NULL AND m.expiresAt < :now")
+    int deleteExpired(@Param("now") Instant now);
 }

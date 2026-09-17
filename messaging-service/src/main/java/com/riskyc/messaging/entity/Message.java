@@ -130,6 +130,17 @@ public class Message {
     @Column(name = "pinned", nullable = false, columnDefinition = "boolean not null default false")
     private boolean pinned = false;
 
+    // Null for a normal message. Set at send time (sentAt + the
+    // conversation's disappearing-message duration, see
+    // DisappearingMessageSettingsRepository) to the instant this row should
+    // stop being visible. Two enforcement layers, same pattern as revoked
+    // JWTs elsewhere in this codebase: history reads filter out anything
+    // already past expiresAt (correct immediately, no window where an
+    // expired message is still visible), and a @Scheduled sweep hard-deletes
+    // expired rows periodically (actually frees the data, not just hides it).
+    @Column(name = "expires_at")
+    private Instant expiresAt;
+
     protected Message() {
         // JPA
     }
@@ -290,5 +301,13 @@ public class Message {
 
     public void setPinned(boolean pinned) {
         this.pinned = pinned;
+    }
+
+    public Instant getExpiresAt() {
+        return expiresAt;
+    }
+
+    public void setExpiresAt(Instant expiresAt) {
+        this.expiresAt = expiresAt;
     }
 }

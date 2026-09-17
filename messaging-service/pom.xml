@@ -41,6 +41,14 @@
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
         </dependency>
+        <!-- Parses link-preview HTML (LinkPreviewController) — a real HTML
+             parser, not hand-rolled regex, for extracting Open Graph tags
+             from third-party pages we don't control. -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.18.1</version>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

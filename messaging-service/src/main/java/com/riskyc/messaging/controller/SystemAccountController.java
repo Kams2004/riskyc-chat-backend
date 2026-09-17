@@ -59,7 +59,8 @@ public class SystemAccountController {
 
         MessageEnvelope outbound = new MessageEnvelope(messageId, request.conversationId(), request.senderId(),
                 request.recipientId(), request.text(), sentAt, message.getStatus().name(), null, null, null, null,
-                false, false, null, false, List.of(), null, null, null, null, false, null);
+                false, false, null, false, List.of(), null, null, null, null, false, null,
+                request.senderDisplayName(), null);
         messagingTemplate.convertAndSend("/topic/conversation." + request.conversationId(), outbound);
         messagingTemplate.convertAndSendToUser(request.recipientId(), "/queue/messages", outbound);
 

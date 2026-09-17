@@ -9,20 +9,27 @@ import com.riskyc.messaging.dto.MessageEditRequest;
 import com.riskyc.messaging.dto.MessageMutation;
 import com.riskyc.messaging.dto.MessagePinRequest;
 import com.riskyc.messaging.dto.MessageStatusUpdate;
+import com.riskyc.messaging.dto.ReactionRequest;
+import com.riskyc.messaging.dto.ReactionUpdate;
 import com.riskyc.messaging.dto.TypingIndicator;
 import com.riskyc.messaging.dto.TypingUpdate;
+import com.riskyc.messaging.entity.DisappearingMessageSettings;
 import com.riskyc.messaging.entity.GroupConversation;
 import com.riskyc.messaging.entity.GroupMember;
 import com.riskyc.messaging.entity.Message;
 import com.riskyc.messaging.entity.MessageAttachment;
 import com.riskyc.messaging.entity.MessageDeletion;
+import com.riskyc.messaging.entity.MessageReaction;
 import com.riskyc.messaging.entity.MessageReceipt;
+import com.riskyc.messaging.repository.DisappearingMessageSettingsRepository;
 import com.riskyc.messaging.repository.GroupConversationRepository;
 import com.riskyc.messaging.repository.GroupMemberRepository;
 import com.riskyc.messaging.repository.MessageAttachmentRepository;
 import com.riskyc.messaging.repository.MessageDeletionRepository;
+import com.riskyc.messaging.repository.MessageReactionRepository;
 import com.riskyc.messaging.repository.MessageReceiptRepository;
 import com.riskyc.messaging.repository.MessageRepository;
+import com.riskyc.messaging.repository.MutedConversationRepository;
 import com.riskyc.messaging.service.PushNotificationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,6 +43,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -58,12 +66,18 @@ public class ChatController {
     private final MessageReceiptRepository receiptRepository;
     private final MessageDeletionRepository messageDeletionRepository;
     private final MessageAttachmentRepository messageAttachmentRepository;
+    private final MessageReactionRepository messageReactionRepository;
+    private final MutedConversationRepository mutedConversationRepository;
+    private final DisappearingMessageSettingsRepository disappearingMessageSettingsRepository;
     private final SimpMessagingTemplate messagingTemplate;
     private final PushNotificationService pushNotificationService;
 
     public ChatController(MessageRepository messageRepository, GroupMemberRepository groupMemberRepository,
                            GroupConversationRepository groupConversationRepository, MessageReceiptRepository receiptRepository,
                            MessageDeletionRepository messageDeletionRepository, MessageAttachmentRepository messageAttachmentRepository,
+                           MessageReactionRepository messageReactionRepository,
+                           MutedConversationRepository mutedConversationRepository,
+                           DisappearingMessageSettingsRepository disappearingMessageSettingsRepository,
                            SimpMessagingTemplate messagingTemplate, PushNotificationService pushNotificationService) {
         this.messageRepository = messageRepository;
         this.groupMemberRepository = groupMemberRepository;
@@ -71,6 +85,9 @@ public class ChatController {
         this.receiptRepository = receiptRepository;
         this.messageDeletionRepository = messageDeletionRepository;
         this.messageAttachmentRepository = messageAttachmentRepository;
+        this.messageReactionRepository = messageReactionRepository;
+        this.mutedConversationRepository = mutedConversationRepository;
+        this.disappearingMessageSettingsRepository = disappearingMessageSettingsRepository;
         this.messagingTemplate = messagingTemplate;
         this.pushNotificationService = pushNotificationService;
     }
@@ -122,6 +139,12 @@ public class ChatController {
         // logic, just a fresh messageId in a possibly different
         // conversation) — no separate endpoint, just this one extra flag.
         message.setForwarded(inbound.forwarded());
+        // Stamped once, at send time, from whatever the conversation's
+        // disappearing-messages duration is right now — a later change to
+        // that setting never retroactively touches already-sent messages,
+        // same as WhatsApp.
+        disappearingMessageSettingsRepository.findById(inbound.conversationId())
+                .ifPresent(s -> message.setExpiresAt(sentAt.plusSeconds(s.getDurationSeconds())));
         messageRepository.save(message);
 
         // Multi-attachment (gallery) send: a message never uses both this
@@ -146,7 +169,8 @@ public class ChatController {
                 message.getStatus().name(), inbound.mediaType(), inbound.mediaObjectKey(),
                 inbound.mediaFileName(), inbound.mediaDurationMs(), false, false, inbound.groupId(),
                 inbound.forwarded(), attachmentDtos, inbound.replyToMessageId(), inbound.replyToConversationId(),
-                inbound.replyToSenderId(), inbound.replyToSnippet(), false, null);
+                inbound.replyToSenderId(), inbound.replyToSnippet(), false, null,
+                inbound.senderDisplayName(), message.getExpiresAt());
         messagingTemplate.convertAndSend("/topic/conversation." + inbound.conversationId(), outbound);
 
         String previewBody = previewFor(inbound.mediaType(), inbound.ciphertext(), attachmentDtos.size());
@@ -163,11 +187,20 @@ public class ChatController {
                     .map(GroupConversation::getName).orElse("Group chat");
             for (String memberId : otherMemberIds(inbound.groupId(), inbound.senderId())) {
                 messagingTemplate.convertAndSendToUser(memberId, "/queue/messages", outbound);
-                pushNotificationService.sendToUser(memberId, groupName, previewBody, "messages", pushData);
+                // Muted only skips the push notification, never the in-app
+                // delivery above — a muted chat still updates its unread
+                // count and message list, same as WhatsApp, it just doesn't
+                // bang/buzz the device.
+                if (!mutedConversationRepository.existsByUserIdAndConversationId(memberId, inbound.groupId())) {
+                    pushNotificationService.sendToUser(memberId, groupName, previewBody, "messages", pushData);
+                }
             }
         } else {
             messagingTemplate.convertAndSendToUser(inbound.recipientId(), "/queue/messages", outbound);
-            pushNotificationService.sendToUser(inbound.recipientId(), "RiskyC Chat", previewBody, "messages", pushData);
+            String pushTitle = inbound.senderDisplayName() != null ? inbound.senderDisplayName() : "RiskyC Chat";
+            if (!mutedConversationRepository.existsByUserIdAndConversationId(inbound.recipientId(), inbound.conversationId())) {
+                pushNotificationService.sendToUser(inbound.recipientId(), pushTitle, previewBody, "messages", pushData);
+            }
         }
     }
 
@@ -351,6 +384,38 @@ public class ChatController {
             messagingTemplate.convertAndSend("/topic/conversation." + request.conversationId() + ".mutations", mutation);
             pushMutationToInboxes(message, mutation);
         });
+    }
+
+    /**
+     * Same emoji the caller already reacted with → removes it (a toggle).
+     * A different emoji → replaces it. Only ever one reaction per (message,
+     * user) — see MessageReaction's own doc comment. userId comes from the
+     * STOMP Principal, never the client payload, so one participant can't
+     * react on another's behalf.
+     */
+    @MessageMapping("/chat.react")
+    public void react(ReactionRequest request, Principal principal) {
+        if (principal == null) {
+            return;
+        }
+        String userId = principal.getName();
+        Optional<MessageReaction> existing = messageReactionRepository.findByMessageIdAndUserId(request.messageId(), userId);
+
+        String resultingEmoji;
+        if (existing.isPresent() && existing.get().getEmoji().equals(request.emoji())) {
+            messageReactionRepository.deleteByMessageIdAndUserId(request.messageId(), userId);
+            resultingEmoji = null;
+        } else if (existing.isPresent()) {
+            existing.get().setEmoji(request.emoji());
+            messageReactionRepository.save(existing.get());
+            resultingEmoji = request.emoji();
+        } else {
+            messageReactionRepository.save(new MessageReaction(request.messageId(), userId, request.emoji(), Instant.now()));
+            resultingEmoji = request.emoji();
+        }
+
+        ReactionUpdate update = new ReactionUpdate(request.messageId(), userId, resultingEmoji);
+        messagingTemplate.convertAndSend("/topic/conversation." + request.conversationId() + ".reactions", update);
     }
 
     /**

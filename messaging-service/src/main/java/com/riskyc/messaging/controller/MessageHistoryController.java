@@ -8,6 +8,7 @@ import com.riskyc.messaging.entity.MessageAttachment;
 import com.riskyc.messaging.repository.GroupMemberRepository;
 import com.riskyc.messaging.repository.MessageAttachmentRepository;
 import com.riskyc.messaging.repository.MessageDeletionRepository;
+import com.riskyc.messaging.repository.MessageReactionRepository;
 import com.riskyc.messaging.repository.MessageRepository;
 import com.riskyc.messaging.security.RevokedJtiCache;
 import org.springframework.http.HttpStatus;
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -32,16 +34,19 @@ public class MessageHistoryController {
     private final GroupMemberRepository groupMemberRepository;
     private final MessageDeletionRepository messageDeletionRepository;
     private final MessageAttachmentRepository messageAttachmentRepository;
+    private final MessageReactionRepository messageReactionRepository;
     private final JwtIssuer jwtIssuer;
     private final RevokedJtiCache revokedJtiCache;
 
     public MessageHistoryController(MessageRepository messageRepository, GroupMemberRepository groupMemberRepository,
                                      MessageDeletionRepository messageDeletionRepository,
-                                     MessageAttachmentRepository messageAttachmentRepository, JwtIssuer jwtIssuer,
+                                     MessageAttachmentRepository messageAttachmentRepository,
+                                     MessageReactionRepository messageReactionRepository, JwtIssuer jwtIssuer,
                                      RevokedJtiCache revokedJtiCache) {
         this.messageRepository = messageRepository;
         this.groupMemberRepository = groupMemberRepository;
         this.messageDeletionRepository = messageDeletionRepository;
+        this.messageReactionRepository = messageReactionRepository;
         this.messageAttachmentRepository = messageAttachmentRepository;
         this.jwtIssuer = jwtIssuer;
         this.revokedJtiCache = revokedJtiCache;
@@ -78,8 +83,13 @@ public class MessageHistoryController {
                 .collect(Collectors.groupingBy(MessageAttachment::getMessageId,
                         Collectors.mapping(this::toAttachmentDto, Collectors.toList())));
 
+        Instant now = Instant.now();
         return messages.stream()
                 .filter(m -> !deletedForMe.contains(m.getMessageId()))
+                // Correct immediately even before the scheduled sweep
+                // (DisappearingMessageCleanupJob) actually deletes the row —
+                // see Message.expiresAt's own doc comment.
+                .filter(m -> m.getExpiresAt() == null || m.getExpiresAt().isAfter(now))
                 .map(m -> new MessageEnvelope(m.getMessageId(), m.getConversationId(), m.getSenderId(),
                         m.getRecipientId(), m.getCiphertext(), m.getSentAt(), m.getStatus().name(),
                         m.getMediaType() != null ? m.getMediaType().name() : null,
@@ -87,7 +97,8 @@ public class MessageHistoryController {
                         m.isEdited(), m.isDeleted(), m.getGroupId(), m.isForwarded(),
                         attachmentsByMessage.getOrDefault(m.getMessageId(), List.of()),
                         m.getReplyToMessageId(), m.getReplyToConversationId(), m.getReplyToSenderId(),
-                        m.getReplyToSnippet(), m.isPinned(), m.getMediaParticipantCount()))
+                        m.getReplyToSnippet(), m.isPinned(), m.getMediaParticipantCount(),
+                        null, m.getExpiresAt()))
                 .toList();
     }
 
@@ -137,6 +148,23 @@ public class MessageHistoryController {
         }
         return messageRepository.searchInConversation(conversationId, q).stream()
                 .map(m -> new SearchResult(m.getMessageId(), m.getSenderId(), m.getCiphertext(), m.getSentAt()))
+                .toList();
+    }
+
+    public record ReactionRow(String messageId, String userId, String emoji) {
+    }
+
+    /** Bulk, one call per conversation open — feeds initial reaction state; live updates arrive over /topic/conversation.{id}.reactions afterward (see ChatController#react). */
+    @GetMapping("/{conversationId}/reactions")
+    public List<ReactionRow> reactions(@PathVariable String conversationId,
+                                        @RequestHeader(value = "Authorization", required = false) String authorization) {
+        String callerId = callerIdFrom(authorization);
+        requireMembership(conversationId, callerId);
+        List<String> messageIds = messageRepository.findByConversationIdOrderBySentAtAsc(conversationId).stream()
+                .map(Message::getMessageId)
+                .toList();
+        return messageReactionRepository.findByMessageIdIn(messageIds).stream()
+                .map(r -> new ReactionRow(r.getMessageId(), r.getUserId(), r.getEmoji()))
                 .toList();
     }
 
