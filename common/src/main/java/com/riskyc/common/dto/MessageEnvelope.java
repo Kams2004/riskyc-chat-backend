@@ -50,6 +50,11 @@ public record MessageEnvelope(
          */
         String senderDisplayName,
         /** Null for a normal message. Set when the conversation had disappearing messages enabled at send time — see Message.java's own field comment. */
-        Instant expiresAt
+        Instant expiresAt,
+        /** True for a group event log line ("X joined the group"), never something a person typed — see Message.java's own field comment. */
+        boolean system,
+        /** Both null unless this message is a reply to a status — see Message.java's own field comment. */
+        String replyToStatusId,
+        String replyToStatusOwnerId
 ) {
 }

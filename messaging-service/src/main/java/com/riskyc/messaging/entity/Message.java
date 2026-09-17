@@ -141,6 +141,30 @@ public class Message {
     @Column(name = "expires_at")
     private Instant expiresAt;
 
+    // True for a group event log line ("X joined the group") rather than
+    // something a person typed — senderId is still the person the event is
+    // about (the joiner), so memberName()-style resolution on the client
+    // works unchanged; ciphertext holds a fixed sentinel string (see
+    // GroupController's SYSTEM_* constants) that the client maps to a
+    // translated line, never raw display text, so it renders correctly
+    // regardless of viewer language. Rendered centered, distinct from a
+    // normal left/right bubble — see chats/[conversationId].tsx.
+    @Column(name = "is_system", nullable = false, columnDefinition = "boolean not null default false")
+    private boolean system = false;
+
+    // Both null for a message that isn't a status reply. Set client-side at
+    // send time (same "denormalized, not server-derived" convention as the
+    // replyToMessage* fields above) so the recipient's client can render a
+    // "Replied to your status" quote and, on tap, reopen that exact status
+    // — replyToStatusOwnerId is the poster's userId (StatusController's
+    // GET /api/status/{userId} needs it directly; there's no reverse lookup
+    // from a bare statusId).
+    @Column(name = "reply_to_status_id")
+    private String replyToStatusId;
+
+    @Column(name = "reply_to_status_owner_id")
+    private String replyToStatusOwnerId;
+
     protected Message() {
         // JPA
     }
@@ -309,5 +333,29 @@ public class Message {
 
     public void setExpiresAt(Instant expiresAt) {
         this.expiresAt = expiresAt;
+    }
+
+    public boolean isSystem() {
+        return system;
+    }
+
+    public void setSystem(boolean system) {
+        this.system = system;
+    }
+
+    public String getReplyToStatusId() {
+        return replyToStatusId;
+    }
+
+    public void setReplyToStatusId(String replyToStatusId) {
+        this.replyToStatusId = replyToStatusId;
+    }
+
+    public String getReplyToStatusOwnerId() {
+        return replyToStatusOwnerId;
+    }
+
+    public void setReplyToStatusOwnerId(String replyToStatusOwnerId) {
+        this.replyToStatusOwnerId = replyToStatusOwnerId;
     }
 }

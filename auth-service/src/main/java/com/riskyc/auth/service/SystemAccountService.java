@@ -41,6 +41,8 @@ public class SystemAccountService {
     private final String accessEmail;
     private final String displayName;
     private final String welcomeMessage;
+    private final String description;
+    private final String websiteUrl;
     private final String messagingServiceInternalUrl;
     private final String internalApiKey;
 
@@ -48,18 +50,30 @@ public class SystemAccountService {
                                  @Value("${riskyc.system-account.access-email:}") String accessEmail,
                                  @Value("${riskyc.system-account.display-name:RiskyC Fashion}") String displayName,
                                  @Value("${riskyc.system-account.welcome-message:}") String welcomeMessage,
+                                 @Value("${riskyc.system-account.description:}") String description,
+                                 @Value("${riskyc.system-account.website-url:}") String websiteUrl,
                                  @Value("${riskyc.messaging-service.internal-url}") String messagingServiceInternalUrl,
                                  @Value("${riskyc.internal.api-key:}") String internalApiKey) {
         this.userRepository = userRepository;
         this.accessEmail = accessEmail;
         this.displayName = displayName;
         this.welcomeMessage = welcomeMessage;
+        this.description = description;
+        this.websiteUrl = websiteUrl;
         this.messagingServiceInternalUrl = messagingServiceInternalUrl;
         this.internalApiKey = internalApiKey;
     }
 
     public boolean isEnabled() {
         return !accessEmail.isBlank();
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public String getWebsiteUrl() {
+        return websiteUrl;
     }
 
     public boolean matchesAccessIdentifier(String email) {

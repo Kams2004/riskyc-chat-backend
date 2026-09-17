@@ -54,7 +54,18 @@ riskyc:
     # client's own identifier validation without any special-casing there.
     access-email: ${RISKYC_SYSTEM_ACCOUNT_ACCESS_EMAIL:}
     display-name: ${RISKYC_SYSTEM_ACCOUNT_DISPLAY_NAME:RiskyC Fashion}
-    welcome-message: ${RISKYC_SYSTEM_ACCOUNT_WELCOME_MESSAGE:Welcome to RiskyC Chat! We're glad you're here. If you ever need help or have questions, just reply to this message.}
+    # This account is broadcast-only (see SystemAccountController#broadcast
+    # and the mobile client's read-only composer for it) — the default copy
+    # deliberately doesn't invite a reply the way an earlier version of this
+    # message did, since one is no longer possible.
+    welcome-message: ${RISKYC_SYSTEM_ACCOUNT_WELCOME_MESSAGE:Welcome to RiskyC Chat! We're glad you're here.}
+    # Shown on this account's "details" page in the client (see
+    # SystemAccountInfoController#get) — a short description and a website
+    # link, the same two things WhatsApp's own official/business accounts
+    # show. Both blank by default; the client shows the section only when
+    # at least one is set.
+    description: ${RISKYC_SYSTEM_ACCOUNT_DESCRIPTION:}
+    website-url: ${RISKYC_SYSTEM_ACCOUNT_WEBSITE_URL:}
   messaging-service:
     # First time auth-service calls OUT to messaging-service (every other
     # cross-service call in this codebase goes the other direction) — only

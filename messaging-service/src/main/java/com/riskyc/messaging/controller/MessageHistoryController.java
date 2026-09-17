@@ -98,7 +98,7 @@ public class MessageHistoryController {
                         attachmentsByMessage.getOrDefault(m.getMessageId(), List.of()),
                         m.getReplyToMessageId(), m.getReplyToConversationId(), m.getReplyToSenderId(),
                         m.getReplyToSnippet(), m.isPinned(), m.getMediaParticipantCount(),
-                        null, m.getExpiresAt()))
+                        null, m.getExpiresAt(), m.isSystem(), m.getReplyToStatusId(), m.getReplyToStatusOwnerId()))
                 .toList();
     }
 

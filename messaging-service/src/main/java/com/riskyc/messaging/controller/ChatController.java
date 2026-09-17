@@ -129,6 +129,8 @@ public class ChatController {
         message.setReplyToConversationId(inbound.replyToConversationId());
         message.setReplyToSenderId(inbound.replyToSenderId());
         message.setReplyToSnippet(inbound.replyToSnippet());
+        message.setReplyToStatusId(inbound.replyToStatusId());
+        message.setReplyToStatusOwnerId(inbound.replyToStatusOwnerId());
         if (inbound.mediaType() != null) {
             message.setMediaType(Message.MediaType.valueOf(inbound.mediaType()));
             message.setMediaObjectKey(inbound.mediaObjectKey());
@@ -170,7 +172,8 @@ public class ChatController {
                 inbound.mediaFileName(), inbound.mediaDurationMs(), false, false, inbound.groupId(),
                 inbound.forwarded(), attachmentDtos, inbound.replyToMessageId(), inbound.replyToConversationId(),
                 inbound.replyToSenderId(), inbound.replyToSnippet(), false, null,
-                inbound.senderDisplayName(), message.getExpiresAt());
+                inbound.senderDisplayName(), message.getExpiresAt(), false,
+                inbound.replyToStatusId(), inbound.replyToStatusOwnerId());
         messagingTemplate.convertAndSend("/topic/conversation." + inbound.conversationId(), outbound);
 
         String previewBody = previewFor(inbound.mediaType(), inbound.ciphertext(), attachmentDtos.size());
