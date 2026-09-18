@@ -38,6 +38,15 @@ public class Session {
     @Column(name = "device_label")
     private String deviceLabel;
 
+    // "ios" | "android" | "web" | "system" — drives the one-active-mobile-
+    // session-per-account rule in AuthController#verifyOtp (web is exempt by
+    // design; "system" is the system-account short-circuit login, also
+    // exempt). Client-supplied like deviceLabel, but unlike deviceLabel this
+    // one IS trusted for something security-relevant, so treat any value
+    // outside the four above as non-mobile rather than guessing.
+    @Column(name = "platform")
+    private String platform;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -57,12 +66,13 @@ public class Session {
         // JPA
     }
 
-    public Session(String jti, UUID userId, String deviceLabel, Instant createdAt) {
+    public Session(String jti, UUID userId, String deviceLabel, Instant createdAt, String platform) {
         this.jti = jti;
         this.userId = userId;
         this.deviceLabel = deviceLabel;
         this.createdAt = createdAt;
         this.lastSeenAt = createdAt;
+        this.platform = platform;
     }
 
     public UUID getId() {
@@ -79,6 +89,10 @@ public class Session {
 
     public String getDeviceLabel() {
         return deviceLabel;
+    }
+
+    public String getPlatform() {
+        return platform;
     }
 
     public Instant getCreatedAt() {

@@ -4,6 +4,7 @@ import com.riskyc.auth.entity.Session;
 import com.riskyc.auth.entity.User;
 import com.riskyc.auth.repository.SessionRepository;
 import com.riskyc.auth.repository.UserRepository;
+import com.riskyc.auth.service.DeviceSwitchService;
 import com.riskyc.auth.service.EmailOtpSender;
 import com.riskyc.auth.service.IdentifierValidator;
 import com.riskyc.auth.service.OtpRateLimiter;
@@ -18,9 +19,11 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.logging.Level;
@@ -46,10 +49,15 @@ public class AuthController {
     private final EmailOtpSender emailOtpSender;
     private final SmsOtpSender smsOtpSender;
     private final SystemAccountService systemAccountService;
+    private final DeviceSwitchService deviceSwitchService;
+
+    /** The only platform value that counts as "a phone" for the one-active-mobile-session rule below — web is deliberately excluded, both as the caller and as anything it could ever conflict with. */
+    private static final String MOBILE_PLATFORM = "mobile";
 
     public AuthController(OtpService otpService, OtpRateLimiter rateLimiter, UserRepository userRepository,
                            SessionRepository sessionRepository, JwtIssuer jwtIssuer, EmailOtpSender emailOtpSender,
-                           SmsOtpSender smsOtpSender, SystemAccountService systemAccountService) {
+                           SmsOtpSender smsOtpSender, SystemAccountService systemAccountService,
+                           DeviceSwitchService deviceSwitchService) {
         this.otpService = otpService;
         this.rateLimiter = rateLimiter;
         this.userRepository = userRepository;
@@ -58,20 +66,41 @@ public class AuthController {
         this.emailOtpSender = emailOtpSender;
         this.smsOtpSender = smsOtpSender;
         this.systemAccountService = systemAccountService;
+        this.deviceSwitchService = deviceSwitchService;
     }
 
     public record OtpRequest(String phoneNumber, String email) {
     }
 
-    /** deviceLabel is client-supplied, display-only (e.g. "iPhone 15 — Safari") — shown on the logged-in-devices screen, never trusted for anything security-relevant. */
-    public record OtpVerifyRequest(String phoneNumber, String email, String code, String displayName, String deviceLabel) {
+    /**
+     * deviceLabel is client-supplied, display-only (e.g. "iPhone 15 — Safari")
+     * — shown on the logged-in-devices screen, never trusted for anything
+     * security-relevant. platform IS trusted for something real: it's what
+     * drives the one-active-mobile-session-per-account rule in verifyOtp
+     * below — send "mobile" from the app, anything else (including omitted,
+     * from web or an older client) is treated as non-mobile and never
+     * triggers or is subject to that rule.
+     */
+    public record OtpVerifyRequest(String phoneNumber, String email, String code, String displayName, String deviceLabel, String platform) {
     }
 
     /** Returned as the body of a 429 so the client can tell a hard SMS trial cutoff apart from an ordinary "slow down". */
     public record OtpRequestError(String reason) {
     }
 
-    public record TokenResponse(String accessToken, String userId, String displayName, String avatarObjectKey, String email, String phoneNumber) {
+    public record DeviceSwitchConfirmRequest(String confirmationToken) {
+    }
+
+    /**
+     * accessToken is null exactly when requiresDeviceSwitchConfirmation is
+     * true — the OTP was correct (so displayName/etc. below are real), but
+     * this account is already active on another phone, and the client must
+     * ask "sign out there and continue here?" before login actually
+     * completes. See DeviceSwitchService and AuthController#confirmDeviceSwitch.
+     */
+    public record TokenResponse(String accessToken, String userId, String displayName, String avatarObjectKey,
+                                 String email, String phoneNumber, boolean requiresDeviceSwitchConfirmation,
+                                 String confirmationToken, String conflictingDeviceLabel) {
     }
 
     /**
@@ -104,9 +133,9 @@ public class AuthController {
             User system = systemAccountService.findOrCreateAccount();
             String jti = UUID.randomUUID().toString();
             String token = jwtIssuer.issue(system.getId().toString(), Duration.ofDays(30), jti);
-            sessionRepository.save(new Session(jti, system.getId(), "System account access", Instant.now()));
+            sessionRepository.save(new Session(jti, system.getId(), "System account access", Instant.now(), "system"));
             return ResponseEntity.ok(new TokenResponse(token, system.getId().toString(), system.getDisplayName(),
-                    system.getAvatarObjectKey(), system.getEmail(), system.getPhoneNumber()));
+                    system.getAvatarObjectKey(), system.getEmail(), system.getPhoneNumber(), false, null, null));
         }
 
         // General rate limit FIRST: allowSmsTrial() unconditionally
@@ -174,10 +203,59 @@ public class AuthController {
             systemAccountService.sendWelcomeMessage(user);
         }
 
+        // A brand-new user can't already have a session, so this only ever
+        // triggers for a returning account — and only from a mobile client
+        // (web is exempt by design, per MOBILE_PLATFORM above): "two phones
+        // shouldn't have the same account open at once" doesn't apply to a
+        // browser tab, and a web session already open elsewhere never counts
+        // against this check either.
+        if (MOBILE_PLATFORM.equals(request.platform())) {
+            List<Session> activeMobileSessions = sessionRepository
+                    .findByUserIdAndPlatformAndRevokedFalse(user.getId(), MOBILE_PLATFORM);
+            if (!activeMobileSessions.isEmpty()) {
+                String confirmationToken = deviceSwitchService.stash(user.getId(), request.deviceLabel(), request.platform());
+                return ResponseEntity.ok(new TokenResponse(null, user.getId().toString(), user.getDisplayName(),
+                        user.getAvatarObjectKey(), user.getEmail(), user.getPhoneNumber(), true,
+                        confirmationToken, activeMobileSessions.get(0).getDeviceLabel()));
+            }
+        }
+
         String jti = UUID.randomUUID().toString();
         String token = jwtIssuer.issue(user.getId().toString(), Duration.ofDays(30), jti);
-        sessionRepository.save(new Session(jti, user.getId(), request.deviceLabel(), Instant.now()));
+        sessionRepository.save(new Session(jti, user.getId(), request.deviceLabel(), Instant.now(), request.platform()));
         return ResponseEntity.ok(new TokenResponse(token, user.getId().toString(), user.getDisplayName(),
-                user.getAvatarObjectKey(), user.getEmail(), user.getPhoneNumber()));
+                user.getAvatarObjectKey(), user.getEmail(), user.getPhoneNumber(), false, null, null));
+    }
+
+    /**
+     * Completes a login that verifyOtp paused on the "already open on
+     * another phone" confirmation — the OTP itself was already verified to
+     * get here (that's what earned the confirmationToken), so this doesn't
+     * re-check it. Revokes every other active mobile session for the
+     * account first, same effect as using the logged-in-devices screen to
+     * sign the old phone out, then issues the real access token exactly
+     * like a normal verifyOtp success.
+     */
+    @PostMapping("/otp/verify/confirm-device-switch")
+    public ResponseEntity<TokenResponse> confirmDeviceSwitch(@RequestBody DeviceSwitchConfirmRequest request) {
+        DeviceSwitchService.PendingLogin pending = deviceSwitchService.consume(request.confirmationToken());
+        if (pending == null) {
+            throw new ResponseStatusException(HttpStatus.GONE, "Confirmation expired — please sign in again");
+        }
+
+        sessionRepository.findByUserIdAndPlatformAndRevokedFalse(pending.userId(), MOBILE_PLATFORM)
+                .forEach(s -> {
+                    s.revoke(Instant.now());
+                    sessionRepository.save(s);
+                });
+
+        User user = userRepository.findById(pending.userId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such user"));
+
+        String jti = UUID.randomUUID().toString();
+        String token = jwtIssuer.issue(user.getId().toString(), Duration.ofDays(30), jti);
+        sessionRepository.save(new Session(jti, user.getId(), pending.deviceLabel(), Instant.now(), pending.platform()));
+        return ResponseEntity.ok(new TokenResponse(token, user.getId().toString(), user.getDisplayName(),
+                user.getAvatarObjectKey(), user.getEmail(), user.getPhoneNumber(), false, null, null));
     }
 }

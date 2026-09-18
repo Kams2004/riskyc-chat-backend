@@ -93,7 +93,18 @@ public class SessionController {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Missing bearer token");
         }
         try {
-            return jwtIssuer.verifyAndGetClaims(authorization.substring("Bearer ".length()));
+            JwtIssuer.JwtClaims claims = jwtIssuer.verifyAndGetClaims(authorization.substring("Bearer ".length()));
+            // Was missing entirely despite this class's own doc comment
+            // claiming auth-service enforces revocation — a signed-out
+            // session's still-valid-looking JWT could list/revoke other
+            // sessions here. Same check as UserController#callerIdFrom.
+            boolean revoked = sessionRepository.findByJti(claims.jti()).map(Session::isRevoked).orElse(false);
+            if (revoked) {
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Session has been signed out");
+            }
+            return claims;
+        } catch (ResponseStatusException e) {
+            throw e;
         } catch (RuntimeException e) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid token");
         }

@@ -356,7 +356,13 @@ public class UserController {
 
         String jti = UUID.randomUUID().toString();
         String token = jwtIssuer.issue(target.getId().toString(), Duration.ofDays(30), jti);
-        sessionRepository.save(new Session(jti, target.getId(), "Linked via email verification", Instant.now()));
+        // profile-setup.tsx (where this flow lives) is mobile-only, so this
+        // is always a mobile session — tagged accordingly for Session-table
+        // consistency, though this specific onboarding path is deliberately
+        // NOT gated by AuthController#verifyOtp's one-mobile-session rule
+        // (out of scope for a one-time merge, see that method's own doc
+        // comment for where the rule actually applies).
+        sessionRepository.save(new Session(jti, target.getId(), "Linked via email verification", Instant.now(), "mobile"));
 
         return ResponseEntity.ok(new MergeResult(true, token, toResult(target)));
     }

@@ -1,6 +1,8 @@
 package com.riskyc.auth.controller;
 
+import com.riskyc.auth.entity.Session;
 import com.riskyc.auth.entity.User;
+import com.riskyc.auth.repository.SessionRepository;
 import com.riskyc.auth.repository.UserRepository;
 import com.riskyc.auth.service.SystemAccountService;
 import com.riskyc.common.security.JwtIssuer;
@@ -31,13 +33,16 @@ public class SystemAccountInfoController {
     private final SystemAccountService systemAccountService;
     private final UserRepository userRepository;
     private final JwtIssuer jwtIssuer;
+    private final SessionRepository sessionRepository;
     private final String internalApiKey;
 
     public SystemAccountInfoController(SystemAccountService systemAccountService, UserRepository userRepository,
-                                        JwtIssuer jwtIssuer, @Value("${riskyc.internal.api-key:}") String internalApiKey) {
+                                        JwtIssuer jwtIssuer, SessionRepository sessionRepository,
+                                        @Value("${riskyc.internal.api-key:}") String internalApiKey) {
         this.systemAccountService = systemAccountService;
         this.userRepository = userRepository;
         this.jwtIssuer = jwtIssuer;
+        this.sessionRepository = sessionRepository;
         this.internalApiKey = internalApiKey;
     }
 
@@ -95,7 +100,13 @@ public class SystemAccountInfoController {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Missing bearer token");
         }
         try {
-            jwtIssuer.verifyAndGetClaims(authorization.substring("Bearer ".length()));
+            JwtIssuer.JwtClaims claims = jwtIssuer.verifyAndGetClaims(authorization.substring("Bearer ".length()));
+            boolean revoked = sessionRepository.findByJti(claims.jti()).map(Session::isRevoked).orElse(false);
+            if (revoked) {
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Session has been signed out");
+            }
+        } catch (ResponseStatusException e) {
+            throw e;
         } catch (RuntimeException e) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid token");
         }

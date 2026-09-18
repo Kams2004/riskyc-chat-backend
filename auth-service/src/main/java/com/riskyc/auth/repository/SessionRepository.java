@@ -15,4 +15,7 @@ public interface SessionRepository extends JpaRepository<Session, UUID> {
 
     /** Polled by messaging-service's RevokedJtiCache — only jtis revoked since the last poll need to be (re-)learned. */
     List<Session> findByRevokedTrueAndRevokedAtAfter(Instant since);
+
+    /** Feeds the one-active-mobile-session-per-account check in AuthController#verifyOtp. */
+    List<Session> findByUserIdAndPlatformAndRevokedFalse(UUID userId, String platform);
 }

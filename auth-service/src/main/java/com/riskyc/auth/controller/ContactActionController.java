@@ -1,8 +1,10 @@
 package com.riskyc.auth.controller;
 
 import com.riskyc.auth.entity.BlockedUser;
+import com.riskyc.auth.entity.Session;
 import com.riskyc.auth.entity.UserReport;
 import com.riskyc.auth.repository.BlockedUserRepository;
+import com.riskyc.auth.repository.SessionRepository;
 import com.riskyc.auth.repository.UserReportRepository;
 import com.riskyc.common.security.JwtIssuer;
 import org.springframework.http.HttpStatus;
@@ -30,12 +32,14 @@ public class ContactActionController {
     private final BlockedUserRepository blockedUserRepository;
     private final UserReportRepository userReportRepository;
     private final JwtIssuer jwtIssuer;
+    private final SessionRepository sessionRepository;
 
     public ContactActionController(BlockedUserRepository blockedUserRepository, UserReportRepository userReportRepository,
-                                    JwtIssuer jwtIssuer) {
+                                    JwtIssuer jwtIssuer, SessionRepository sessionRepository) {
         this.blockedUserRepository = blockedUserRepository;
         this.userReportRepository = userReportRepository;
         this.jwtIssuer = jwtIssuer;
+        this.sessionRepository = sessionRepository;
     }
 
     public record BlockedUserResult(String userId) {
@@ -81,7 +85,14 @@ public class ContactActionController {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Missing bearer token");
         }
         try {
-            return UUID.fromString(jwtIssuer.verifyAndGetSubject(authorization.substring("Bearer ".length())));
+            JwtIssuer.JwtClaims claims = jwtIssuer.verifyAndGetClaims(authorization.substring("Bearer ".length()));
+            boolean revoked = sessionRepository.findByJti(claims.jti()).map(Session::isRevoked).orElse(false);
+            if (revoked) {
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Session has been signed out");
+            }
+            return UUID.fromString(claims.subject());
+        } catch (ResponseStatusException e) {
+            throw e;
         } catch (RuntimeException e) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid token");
         }
