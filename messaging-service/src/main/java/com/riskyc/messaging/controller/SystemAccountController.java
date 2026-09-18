@@ -98,7 +98,7 @@ public class SystemAccountController {
             pushData.put("avatarObjectKey", request.senderAvatarObjectKey());
         }
         String title = request.senderDisplayName() != null ? request.senderDisplayName() : "RiskyC Chat";
-        pushNotificationService.sendToUser(request.recipientId(), title, request.text(), "messages", pushData);
+        pushNotificationService.sendToUser(request.recipientId(), title, request.text(), "messages-v2", pushData);
     }
 
     public record BroadcastRequest(String text, String mediaType, String mediaObjectKey, String mediaFileName,
@@ -170,7 +170,7 @@ public class SystemAccountController {
             if (request.senderAvatarObjectKey() != null) {
                 pushData.put("avatarObjectKey", request.senderAvatarObjectKey());
             }
-            pushNotificationService.sendToUser(recipientId, title, previewBody, "messages", pushData);
+            pushNotificationService.sendToUser(recipientId, title, previewBody, "messages-v2", pushData);
         }
     }
 

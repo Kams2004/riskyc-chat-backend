@@ -195,14 +195,14 @@ public class ChatController {
                 // count and message list, same as WhatsApp, it just doesn't
                 // bang/buzz the device.
                 if (!mutedConversationRepository.existsByUserIdAndConversationId(memberId, inbound.groupId())) {
-                    pushNotificationService.sendToUser(memberId, groupName, previewBody, "messages", pushData);
+                    pushNotificationService.sendToUser(memberId, groupName, previewBody, "messages-v2", pushData);
                 }
             }
         } else {
             messagingTemplate.convertAndSendToUser(inbound.recipientId(), "/queue/messages", outbound);
             String pushTitle = inbound.senderDisplayName() != null ? inbound.senderDisplayName() : "RiskyC Chat";
             if (!mutedConversationRepository.existsByUserIdAndConversationId(inbound.recipientId(), inbound.conversationId())) {
-                pushNotificationService.sendToUser(inbound.recipientId(), pushTitle, previewBody, "messages", pushData);
+                pushNotificationService.sendToUser(inbound.recipientId(), pushTitle, previewBody, "messages-v2", pushData);
             }
         }
     }

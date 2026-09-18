@@ -91,7 +91,7 @@ public class CallController {
         pushData.put("callType", inbound.type());
         String callerLabel = inbound.callerName() != null && !inbound.callerName().isBlank() ? inbound.callerName() : "Someone";
         String callKind = "VIDEO".equals(inbound.type()) ? "video call" : "voice call";
-        pushNotificationService.sendToUser(inbound.toUserId(), callerLabel, "Incoming " + callKind, "calls", pushData,
+        pushNotificationService.sendToUser(inbound.toUserId(), callerLabel, "Incoming " + callKind, "calls-v2", pushData,
                 "incoming_call");
     }
 

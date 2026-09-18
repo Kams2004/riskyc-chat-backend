@@ -168,7 +168,7 @@ public class GroupController {
         invitationRepository.save(invitation);
 
         messagingTemplate.convertAndSendToUser(inviteeId, "/queue/group-invitations", Map.of("groupId", groupId));
-        pushNotificationService.sendToUser(inviteeId, groupName, "You've been invited to join this group", "messages",
+        pushNotificationService.sendToUser(inviteeId, groupName, "You've been invited to join this group", "messages-v2",
                 Map.of("type", "group-invitation", "groupId", groupId));
     }
 
