@@ -84,8 +84,14 @@ public class AuthController {
     public record OtpVerifyRequest(String phoneNumber, String email, String code, String displayName, String deviceLabel, String platform) {
     }
 
-    /** Returned as the body of a 429 so the client can tell a hard SMS trial cutoff apart from an ordinary "slow down". */
-    public record OtpRequestError(String reason) {
+    /**
+     * Returned as the body of a 429 so the client can tell a hard SMS trial
+     * cutoff apart from an ordinary "slow down". retryAfterSeconds is only
+     * populated for SMS_TRIAL_LIMIT_REACHED — an exact count-down to when
+     * this specific number's 24h window resets, rather than a vague
+     * "try again later" with no actual time attached.
+     */
+    public record OtpRequestError(String reason, Long retryAfterSeconds) {
     }
 
     public record DeviceSwitchConfirmRequest(String confirmationToken) {
@@ -104,12 +110,28 @@ public class AuthController {
     }
 
     /**
-     * Real client IP — correct as long as nothing sits in front of this
-     * service (true today: no reverse proxy yet). Once one's added, this
-     * needs to read X-Forwarded-For instead, or every request will appear
-     * to come from the proxy's own IP and the per-IP limit becomes useless.
+     * chat.riskycfashion.com's nginx now sits in front of this service (see
+     * nginx-chat.riskycfashion.com.conf's /auth/ location), so
+     * getRemoteAddr() alone would return NGINX'S OWN IP for every request —
+     * exactly the failure this comment used to warn about before it
+     * happened: the per-IP rate limit below silently became one single
+     * shared budget for every user going through the proxy at once,
+     * unrelated phone numbers and even the email channel included, since
+     * this check runs before the phone/email split.
+     *
+     * nginx's `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`
+     * APPENDS the real client IP after whatever a client already sent (if
+     * anything) — so the real IP is the LAST entry, never the first. Taking
+     * the first entry instead would trust a value the client itself
+     * controls, letting anyone bypass this limiter by just sending a fresh
+     * fake X-Forwarded-For on every request.
      */
     private static String clientIp(HttpServletRequest request) {
+        String forwardedFor = request.getHeader("X-Forwarded-For");
+        if (forwardedFor != null && !forwardedFor.isBlank()) {
+            String[] hops = forwardedFor.split(",");
+            return hops[hops.length - 1].trim();
+        }
         return request.getRemoteAddr();
     }
 
@@ -146,14 +168,15 @@ public class AuthController {
         // limit first means only a request that's actually about to be
         // attempted ever counts against the expensive SMS-specific cap.
         if (!rateLimiter.allowIp(clientIp(httpRequest)) || !rateLimiter.allowIdentifier(identifier)) {
-            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(new OtpRequestError("RATE_LIMITED"));
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(new OtpRequestError("RATE_LIMITED", null));
         }
 
         // SMS costs real money per send — a much tighter, dedicated cap
         // (2 total) on top of the general rate limit above. Email has no
         // such cap, so this only ever runs for the phone channel.
         if (isPhone && !rateLimiter.allowSmsTrial(identifier)) {
-            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(new OtpRequestError("SMS_TRIAL_LIMIT_REACHED"));
+            long retryAfterSeconds = rateLimiter.smsTrialResetIn(identifier).getSeconds();
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(new OtpRequestError("SMS_TRIAL_LIMIT_REACHED", retryAfterSeconds));
         }
 
         String code = otpService.generateAndStore(identifier);

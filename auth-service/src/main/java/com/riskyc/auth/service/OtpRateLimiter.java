@@ -84,4 +84,18 @@ public class OtpRateLimiter {
         });
         return updated.count() <= SMS_MAX_TRIALS;
     }
+
+    /**
+     * How long until this phone number's trial window resets, so the client
+     * can tell the person an actual time instead of a bare "try later" —
+     * zero when there's no active window (nothing to wait for).
+     */
+    public Duration smsTrialResetIn(String phoneNumber) {
+        TrialWindow window = smsTrialsByPhone.get(phoneNumber);
+        if (window == null) {
+            return Duration.ZERO;
+        }
+        Duration remaining = Duration.between(Instant.now(), window.windowStart().plus(SMS_TRIAL_WINDOW));
+        return remaining.isNegative() ? Duration.ZERO : remaining;
+    }
 }
