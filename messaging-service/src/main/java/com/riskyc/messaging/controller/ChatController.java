@@ -38,6 +38,7 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 
 import java.security.Principal;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -350,10 +351,17 @@ public class ChatController {
         }
     }
 
+    /** A message can no longer be edited once it's this old — same spirit as WhatsApp's own editing window. STOMP handlers here have no response channel (see this controller's class doc comment), so the client is expected to hide the Edit option itself once a message crosses this age; this is the defensive backend enforcement, same pattern as onlyAdminsCanMessage above. */
+    private static final Duration EDIT_WINDOW = Duration.ofHours(2);
+
     @MessageMapping("/chat.edit")
     public void edit(MessageEditRequest request, Principal principal) {
         messageRepository.findById(request.messageId()).ifPresent(message -> {
             if (principal == null || !principal.getName().equals(message.getSenderId())) {
+                return;
+            }
+            if (message.getSentAt().plus(EDIT_WINDOW).isBefore(Instant.now())) {
+                log.warn("Dropped edit for message {}: past the {}-hour edit window", request.messageId(), EDIT_WINDOW.toHours());
                 return;
             }
             message.setCiphertext(request.newCiphertext());

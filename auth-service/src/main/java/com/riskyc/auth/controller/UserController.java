@@ -24,9 +24,12 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -67,7 +70,7 @@ public class UserController {
     public record UserResult(String userId, String displayName, String email, String phoneNumber, String avatarObjectKey) {
     }
 
-    public record UpdateProfileRequest(String displayName, String avatarObjectKey, String phoneNumber) {
+    public record UpdateProfileRequest(String displayName, String avatarObjectKey, String phoneNumber, String email) {
     }
 
     public record IdentifierChangeRequest(String newPhoneNumber, String newEmail) {
@@ -168,6 +171,22 @@ public class UserController {
                 user.setPhoneNumber(request.phoneNumber().trim());
             }
         }
+        if (request.email() != null && !request.email().isBlank()) {
+            // Same onboarding-only, only-if-not-already-set convention as
+            // phoneNumber above — for the mirror-image path: a phone-signup
+            // account optionally adding an email. Deliberately NOT OTP-
+            // verified (see setOnboardingPhone's own doc comment for why
+            // this whole design avoids extra billed sends) — this account
+            // already proved itself via phone, so the email is saved purely
+            // as a convenience "sign in this way too" alias, same spirit as
+            // typing it "just for saving sake".
+            if (user.getEmail() == null || user.getEmail().isBlank()) {
+                if (userRepository.existsByEmail(request.email().trim())) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT, "Email already in use");
+                }
+                user.setEmail(request.email().trim());
+            }
+        }
         userRepository.save(user);
         return toResult(user);
     }
@@ -256,6 +275,93 @@ public class UserController {
         }
         userRepository.save(user);
         return ResponseEntity.ok(toResult(user));
+    }
+
+    public record OnboardingPhoneRequest(String phoneNumber) {
+    }
+
+    /**
+     * Phone number is this app's canonical identity — even an account that
+     * verified with email is asked for a phone number during onboarding
+     * (see mobile's profile-setup.tsx), specifically so someone who already
+     * has an account (created with their phone, the normal path) doesn't
+     * end up with a second, disconnected one just because they happened to
+     * sign in with email this time.
+     *
+     * Deliberately NOT OTP-verified — an explicit, informed tradeoff: an
+     * SMS costs real money (see OtpRateLimiter's own 2-trial cap), and the
+     * caller already proved who they are once, via email, to get this far.
+     * The practical consequence: typing a phone number that happens to
+     * belong to someone else's account is enough, on its own, to be routed
+     * into it — there is no proof-of-ownership step here. That's a real,
+     * accepted security tradeoff, not an oversight; if it ever needs
+     * hardening later, the fix is adding an OTP check back on top of this
+     * exact lookup, not redesigning the flow.
+     *
+     * merged=false: the number was free (or already the caller's own) — it's
+     * simply attached to the caller's account, same as a plain profile
+     * update, and the caller's existing session keeps working unchanged.
+     *
+     * merged=true: the number already belongs to a DIFFERENT existing
+     * account. The brand-new caller account (created seconds ago by the
+     * email verification that led here, and guaranteed to still be empty,
+     * see the displayName guard below) is discarded, its email is attached
+     * to the pre-existing account if that account doesn't already have one,
+     * and a fresh session is issued for the account that's actually kept.
+     * The client swaps its stored session to the returned token/userId —
+     * that account's own data (messages, groups, etc.) then syncs down the
+     * normal way, the same as any other fresh device signing into an
+     * existing account.
+     */
+    @PostMapping("/api/users/me/onboarding-phone")
+    public ResponseEntity<MergeResult> setOnboardingPhone(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody OnboardingPhoneRequest request) {
+        UUID callerId = callerIdFrom(authorization);
+        String phone = request.phoneNumber() == null ? null : request.phoneNumber().trim();
+        if (phone == null || phone.isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        User caller = userRepository.findById(callerId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such user"));
+
+        Optional<User> existing = userRepository.findByPhoneNumber(phone);
+        if (existing.isEmpty() || existing.get().getId().equals(callerId)) {
+            caller.setPhoneNumber(phone);
+            userRepository.save(caller);
+            return ResponseEntity.ok(new MergeResult(false, null, toResult(caller)));
+        }
+
+        // Defensive: only a genuinely fresh, still-mid-onboarding account
+        // may be discarded this way. displayName is null right up until
+        // profile-setup.tsx's own save() — the ONLY path that ever sets
+        // it — completes, which happens strictly after this call, so a real
+        // established account (which always has one) can never reach here.
+        if (caller.getDisplayName() != null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Phone number already in use");
+        }
+
+        User target = existing.get();
+        // caller must be gone (and flushed) BEFORE target picks up its email —
+        // the email column is unique, so if target's save ran first, both
+        // rows would briefly hold the same address and the DB would reject it.
+        String callerEmail = caller.getEmail();
+        userRepository.delete(caller);
+        userRepository.flush();
+        if (target.getEmail() == null && callerEmail != null) {
+            target.setEmail(callerEmail);
+            userRepository.save(target);
+        }
+
+        String jti = UUID.randomUUID().toString();
+        String token = jwtIssuer.issue(target.getId().toString(), Duration.ofDays(30), jti);
+        sessionRepository.save(new Session(jti, target.getId(), "Linked via email verification", Instant.now()));
+
+        return ResponseEntity.ok(new MergeResult(true, token, toResult(target)));
+    }
+
+    public record MergeResult(boolean merged, String accessToken, UserResult user) {
     }
 
     /**
