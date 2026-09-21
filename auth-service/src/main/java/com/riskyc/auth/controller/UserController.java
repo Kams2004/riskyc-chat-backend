@@ -11,6 +11,10 @@ import com.riskyc.auth.service.OtpService;
 import com.riskyc.auth.service.SmsOtpSender;
 import com.riskyc.common.security.JwtIssuer;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -22,8 +26,11 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -54,10 +61,15 @@ public class UserController {
     private final OtpRateLimiter rateLimiter;
     private final EmailOtpSender emailOtpSender;
     private final SmsOtpSender smsOtpSender;
+    private final String internalApiKey;
+    private final String messagingServiceInternalUrl;
+    private final RestTemplate restTemplate = new RestTemplate();
 
     public UserController(UserRepository userRepository, SessionRepository sessionRepository, JwtIssuer jwtIssuer,
                            OtpService otpService, OtpRateLimiter rateLimiter, EmailOtpSender emailOtpSender,
-                           SmsOtpSender smsOtpSender) {
+                           SmsOtpSender smsOtpSender,
+                           @Value("${riskyc.internal.api-key:}") String internalApiKey,
+                           @Value("${riskyc.messaging-service.internal-url}") String messagingServiceInternalUrl) {
         this.userRepository = userRepository;
         this.sessionRepository = sessionRepository;
         this.jwtIssuer = jwtIssuer;
@@ -65,6 +77,8 @@ public class UserController {
         this.rateLimiter = rateLimiter;
         this.emailOtpSender = emailOtpSender;
         this.smsOtpSender = smsOtpSender;
+        this.internalApiKey = internalApiKey;
+        this.messagingServiceInternalUrl = messagingServiceInternalUrl;
     }
 
     public record UserResult(String userId, String displayName, String email, String phoneNumber, String avatarObjectKey) {
@@ -375,11 +389,34 @@ public class UserController {
      * in messaging-service are left as-is (a different service's data, no
      * cross-service cascade) — this only removes the account itself, which
      * is what stops them being discoverable/loggable-into again.
+     *
+     * Push tokens are the one deliberate exception to "no cascade" above:
+     * unlike messages (where leaving old history visible to the people
+     * this account chatted with is the whole point), a push token pointing
+     * at a deleted account serves nobody — it would just mean a phone that
+     * signed out (or the account itself no longer existing) keeps getting
+     * notifications for messages sent to an id nothing can sign into
+     * anymore. Best-effort: a messaging-service hiccup here shouldn't block
+     * the account deletion itself.
      */
     @DeleteMapping("/api/users/me")
     public void deleteMe(@RequestHeader(value = "Authorization", required = false) String authorization) {
         UUID callerId = callerIdFrom(authorization);
         userRepository.deleteById(callerId);
+        unregisterAllPushTokens(callerId);
+    }
+
+    private void unregisterAllPushTokens(UUID userId) {
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            if (!internalApiKey.isBlank()) {
+                headers.set("X-Internal-Api-Key", internalApiKey);
+            }
+            URI uri = URI.create(messagingServiceInternalUrl + "/internal/push-tokens/" + userId);
+            restTemplate.exchange(uri, HttpMethod.DELETE, new HttpEntity<Void>(headers), Void.class);
+        } catch (RestClientException e) {
+            log.log(Level.WARNING, "Failed to unregister push tokens for deleted account " + userId, e);
+        }
     }
 
     /** Same caveat as AuthController's: correct only as long as nothing sits in front of this service yet. */
