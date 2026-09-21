@@ -9,6 +9,7 @@ import com.riskyc.messaging.repository.GroupMemberRepository;
 import com.riskyc.messaging.repository.MessageAttachmentRepository;
 import com.riskyc.messaging.repository.MessageDeletionRepository;
 import com.riskyc.messaging.repository.MessageReactionRepository;
+import com.riskyc.messaging.repository.MessageReceiptRepository;
 import com.riskyc.messaging.repository.MessageRepository;
 import com.riskyc.messaging.security.RevokedJtiCache;
 import org.springframework.http.HttpStatus;
@@ -35,19 +36,22 @@ public class MessageHistoryController {
     private final MessageDeletionRepository messageDeletionRepository;
     private final MessageAttachmentRepository messageAttachmentRepository;
     private final MessageReactionRepository messageReactionRepository;
+    private final MessageReceiptRepository messageReceiptRepository;
     private final JwtIssuer jwtIssuer;
     private final RevokedJtiCache revokedJtiCache;
 
     public MessageHistoryController(MessageRepository messageRepository, GroupMemberRepository groupMemberRepository,
                                      MessageDeletionRepository messageDeletionRepository,
                                      MessageAttachmentRepository messageAttachmentRepository,
-                                     MessageReactionRepository messageReactionRepository, JwtIssuer jwtIssuer,
+                                     MessageReactionRepository messageReactionRepository,
+                                     MessageReceiptRepository messageReceiptRepository, JwtIssuer jwtIssuer,
                                      RevokedJtiCache revokedJtiCache) {
         this.messageRepository = messageRepository;
         this.groupMemberRepository = groupMemberRepository;
         this.messageDeletionRepository = messageDeletionRepository;
         this.messageReactionRepository = messageReactionRepository;
         this.messageAttachmentRepository = messageAttachmentRepository;
+        this.messageReceiptRepository = messageReceiptRepository;
         this.jwtIssuer = jwtIssuer;
         this.revokedJtiCache = revokedJtiCache;
     }
@@ -165,6 +169,28 @@ public class MessageHistoryController {
                 .toList();
         return messageReactionRepository.findByMessageIdIn(messageIds).stream()
                 .map(r -> new ReactionRow(r.getMessageId(), r.getUserId(), r.getEmoji()))
+                .toList();
+    }
+
+    public record ReceiptRow(String userId, String status) {
+    }
+
+    /**
+     * Per-member read/delivery breakdown for one message — "Message info" on
+     * mobile builds this from receipts it's accumulated locally over the
+     * live .receipts STOMP stream (see ChatController#ackGroup) rather than
+     * ever fetching it, since it's an offline-first client with its own
+     * local store; the web client isn't, so this on-demand fetch is what
+     * lets it show the same picture on demand instead of only for receipts
+     * that happen to arrive while the thread is already open.
+     */
+    @GetMapping("/{conversationId}/{messageId}/receipts")
+    public List<ReceiptRow> receipts(@PathVariable String conversationId, @PathVariable String messageId,
+                                      @RequestHeader(value = "Authorization", required = false) String authorization) {
+        String callerId = callerIdFrom(authorization);
+        requireMembership(conversationId, callerId);
+        return messageReceiptRepository.findByMessageId(messageId).stream()
+                .map(r -> new ReceiptRow(r.getUserId(), r.getStatus().name()))
                 .toList();
     }
 
