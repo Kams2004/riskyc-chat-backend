@@ -90,7 +90,7 @@ public class GroupCallController {
             }
             messagingTemplate.convertAndSendToUser(memberId, "/queue/calls", outbound,
                     Map.of("callMessageType", "group-invite"));
-            pushNotificationService.sendToUser(memberId, callerLabel, "Incoming group " + callKind, "calls-v2", pushData,
+            pushNotificationService.sendToUser(memberId, callerLabel, "Incoming group " + callKind, "calls-v3", pushData,
                     "incoming_group_call");
         }
     }

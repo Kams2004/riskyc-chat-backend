@@ -29,7 +29,9 @@ public class CallHistoryController {
     }
 
     public record CallResult(String id, String callerId, String calleeId, String type, String status,
-                              Instant startedAt, Instant answeredAt, Instant endedAt) {
+                              Instant startedAt, Instant answeredAt, Instant endedAt,
+                              Long callerBytesSent, Long callerBytesReceived,
+                              Long calleeBytesSent, Long calleeBytesReceived) {
     }
 
     @GetMapping
@@ -40,7 +42,9 @@ public class CallHistoryController {
 
     private CallResult toResult(Call call) {
         return new CallResult(call.getId(), call.getCallerId(), call.getCalleeId(), call.getType().name(),
-                call.getStatus().name(), call.getStartedAt(), call.getAnsweredAt(), call.getEndedAt());
+                call.getStatus().name(), call.getStartedAt(), call.getAnsweredAt(), call.getEndedAt(),
+                call.getCallerBytesSent(), call.getCallerBytesReceived(),
+                call.getCalleeBytesSent(), call.getCalleeBytesReceived());
     }
 
     private String callerIdFrom(String authorization) {

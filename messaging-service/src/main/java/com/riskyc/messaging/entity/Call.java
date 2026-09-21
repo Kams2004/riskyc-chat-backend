@@ -61,6 +61,26 @@ public class Call {
     @Column(name = "caller_name")
     private String callerName;
 
+    // Each side reports its OWN totals independently at teardown (see
+    // CallController#reportUsage) — the two are never assumed symmetric.
+    // Video-heavy content, packet loss/retransmits, and which side is
+    // sending vs. mostly receiving can all make one party's bytes look
+    // very different from the other's, which is exactly why the call log
+    // shows both rather than one shared number. Null until that side
+    // actually reports (e.g. a call that never connected has nothing to
+    // report and stays null, not zero).
+    @Column(name = "caller_bytes_sent")
+    private Long callerBytesSent;
+
+    @Column(name = "caller_bytes_received")
+    private Long callerBytesReceived;
+
+    @Column(name = "callee_bytes_sent")
+    private Long calleeBytesSent;
+
+    @Column(name = "callee_bytes_received")
+    private Long calleeBytesReceived;
+
     protected Call() {
         // JPA
     }
@@ -137,5 +157,37 @@ public class Call {
 
     public void setCallerName(String callerName) {
         this.callerName = callerName;
+    }
+
+    public Long getCallerBytesSent() {
+        return callerBytesSent;
+    }
+
+    public void setCallerBytesSent(Long callerBytesSent) {
+        this.callerBytesSent = callerBytesSent;
+    }
+
+    public Long getCallerBytesReceived() {
+        return callerBytesReceived;
+    }
+
+    public void setCallerBytesReceived(Long callerBytesReceived) {
+        this.callerBytesReceived = callerBytesReceived;
+    }
+
+    public Long getCalleeBytesSent() {
+        return calleeBytesSent;
+    }
+
+    public void setCalleeBytesSent(Long calleeBytesSent) {
+        this.calleeBytesSent = calleeBytesSent;
+    }
+
+    public Long getCalleeBytesReceived() {
+        return calleeBytesReceived;
+    }
+
+    public void setCalleeBytesReceived(Long calleeBytesReceived) {
+        this.calleeBytesReceived = calleeBytesReceived;
     }
 }

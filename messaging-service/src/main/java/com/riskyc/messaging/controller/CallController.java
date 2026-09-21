@@ -7,6 +7,8 @@ import com.riskyc.messaging.dto.CallAnswer;
 import com.riskyc.messaging.dto.CallEnd;
 import com.riskyc.messaging.dto.CallIceCandidate;
 import com.riskyc.messaging.dto.CallInvite;
+import com.riskyc.messaging.dto.CallRenegotiateOffer;
+import com.riskyc.messaging.dto.CallUsageReport;
 import com.riskyc.messaging.entity.Call;
 import com.riskyc.messaging.entity.Message;
 import com.riskyc.messaging.repository.CallRepository;
@@ -91,7 +93,7 @@ public class CallController {
         pushData.put("callType", inbound.type());
         String callerLabel = inbound.callerName() != null && !inbound.callerName().isBlank() ? inbound.callerName() : "Someone";
         String callKind = "VIDEO".equals(inbound.type()) ? "video call" : "voice call";
-        pushNotificationService.sendToUser(inbound.toUserId(), callerLabel, "Incoming " + callKind, "calls-v2", pushData,
+        pushNotificationService.sendToUser(inbound.toUserId(), callerLabel, "Incoming " + callKind, "calls-v3", pushData,
                 "incoming_call");
     }
 
@@ -167,6 +169,68 @@ public class CallController {
             CallIceCandidate outbound = new CallIceCandidate(inbound.callId(), fromUserId, inbound.candidate(),
                     inbound.sdpMid(), inbound.sdpMLineIndex());
             messagingTemplate.convertAndSendToUser(toUserId, "/queue/calls", outbound, headersFor("ice"));
+        });
+    }
+
+    /**
+     * ICE restart mid-call — the offerer (see mobile's isOffererRef) detects
+     * its RTCPeerConnection reaching 'failed' (a real network change, not
+     * just a transient 'disconnected' blip WebRTC often recovers from on its
+     * own) and renegotiates a fresh offer/answer without tearing the call
+     * down, same idea as a normal call app riding out a wifi-to-cellular
+     * handoff instead of dropping the call. Pure relay, mirroring call.ice —
+     * the call already exists and is mid-flight, so there's nothing to
+     * persist here beyond what invite/answer already did.
+     */
+    @MessageMapping("/call.renegotiate")
+    public void renegotiate(CallRenegotiateOffer inbound, Principal principal) {
+        if (principal == null) {
+            return;
+        }
+        callRepository.findById(inbound.callId()).ifPresent(call -> {
+            String fromUserId = principal.getName();
+            String toUserId = call.otherParty(fromUserId);
+            CallRenegotiateOffer outbound = new CallRenegotiateOffer(inbound.callId(), fromUserId, inbound.sdpOffer());
+            messagingTemplate.convertAndSendToUser(toUserId, "/queue/calls", outbound, headersFor("renegotiate-offer"));
+        });
+    }
+
+    /** The non-offering side's answer to a call.renegotiate above — same CallAnswer shape as the initial answer, just a different relay header so the client routes it to the right handler. */
+    @MessageMapping("/call.renegotiate-answer")
+    public void renegotiateAnswer(CallAnswer inbound, Principal principal) {
+        if (principal == null) {
+            return;
+        }
+        callRepository.findById(inbound.callId()).ifPresent(call -> {
+            String fromUserId = principal.getName();
+            String toUserId = call.otherParty(fromUserId);
+            CallAnswer outbound = new CallAnswer(inbound.callId(), fromUserId, inbound.sdpAnswer());
+            messagingTemplate.convertAndSendToUser(toUserId, "/queue/calls", outbound, headersFor("renegotiate-answer"));
+        });
+    }
+
+    /**
+     * Fire-and-forget — sent by whichever side notices the call ending,
+     * regardless of who hung up (see mobile's resetCallState), so BOTH
+     * parties' own bytesSent/bytesReceived reach the call log independently
+     * rather than only whoever happened to send call.end getting recorded.
+     */
+    @MessageMapping("/call.report-usage")
+    public void reportUsage(CallUsageReport inbound, Principal principal) {
+        if (principal == null) {
+            return;
+        }
+        callRepository.findById(inbound.callId()).ifPresent(call -> {
+            String userId = principal.getName();
+            if (userId.equals(call.getCallerId())) {
+                call.setCallerBytesSent(inbound.bytesSent());
+                call.setCallerBytesReceived(inbound.bytesReceived());
+                callRepository.save(call);
+            } else if (userId.equals(call.getCalleeId())) {
+                call.setCalleeBytesSent(inbound.bytesSent());
+                call.setCalleeBytesReceived(inbound.bytesReceived());
+                callRepository.save(call);
+            }
         });
     }
 
