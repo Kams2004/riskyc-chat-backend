@@ -47,7 +47,7 @@ import java.util.UUID;
 @RequestMapping("/api/status")
 public class StatusController {
 
-    private static final long STATUS_TTL_HOURS = 24;
+    private static final long STATUS_TTL_HOURS = 48;
 
     private final StatusPostRepository statusPostRepository;
     private final StatusViewRepository statusViewRepository;

@@ -11,7 +11,7 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * Hard-deletes status posts (and their view rows) past their 24h expiry —
+ * Hard-deletes status posts (and their view rows) past their 48h expiry —
  * second of two enforcement layers, mirroring DisappearingMessageCleanupJob.
  * StatusController's feed/detail reads already filter expiresAt themselves,
  * so a slightly-late sweep here never lets an expired status stay visible.

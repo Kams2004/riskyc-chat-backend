@@ -11,7 +11,7 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 
 /**
- * One WhatsApp-style status/story post. expiresAt is always createdAt+24h,
+ * One WhatsApp-style status/story post. expiresAt is always createdAt+48h,
  * stamped once at creation — enforced the same two-layer way as message TTL
  * (see Message.expiresAt's own doc comment): feed/detail reads filter it
  * immediately, and StatusCleanupJob hard-deletes past it. mediaObjectKey
