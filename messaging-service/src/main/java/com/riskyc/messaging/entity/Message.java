@@ -71,6 +71,14 @@ public class Message {
     @Column(name = "media_duration_ms")
     private Integer mediaDurationMs;
 
+    // Comma-separated normalized amplitude samples (0-100 ints) for an AUDIO
+    // message — real data captured live during recording (see mobile's
+    // VoiceRecorder), not derived server-side. Null for every non-voice
+    // message and for any voice message sent before this field existed;
+    // clients fall back to a synthesized placeholder pattern in that case.
+    @Column(name = "waveform", length = 1000)
+    private String waveform;
+
     // Only ever set on a group-call log entry (mediaType=CALL, groupId
     // non-null) — how many people were in the call, so the client can render
     // "Group call · 4 people · 12m" without needing a separate lookup. Null
@@ -245,6 +253,14 @@ public class Message {
 
     public void setMediaDurationMs(Integer mediaDurationMs) {
         this.mediaDurationMs = mediaDurationMs;
+    }
+
+    public String getWaveform() {
+        return waveform;
+    }
+
+    public void setWaveform(String waveform) {
+        this.waveform = waveform;
     }
 
     public Integer getMediaParticipantCount() {

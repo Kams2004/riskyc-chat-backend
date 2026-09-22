@@ -26,6 +26,8 @@ public record MessageEnvelope(
         String mediaObjectKey,
         String mediaFileName,
         Integer mediaDurationMs,
+        /** Comma-separated normalized amplitude samples for an AUDIO message — see Message.java's own field comment. Null for every non-voice message. */
+        String waveform,
         boolean edited,
         boolean deleted,
         String groupId,

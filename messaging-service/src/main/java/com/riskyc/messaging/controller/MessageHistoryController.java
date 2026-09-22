@@ -106,7 +106,7 @@ public class MessageHistoryController {
                 .map(m -> new MessageEnvelope(m.getMessageId(), m.getConversationId(), m.getSenderId(),
                         m.getRecipientId(), m.getCiphertext(), m.getSentAt(), m.getStatus().name(),
                         m.getMediaType() != null ? m.getMediaType().name() : null,
-                        m.getMediaObjectKey(), m.getMediaFileName(), m.getMediaDurationMs(),
+                        m.getMediaObjectKey(), m.getMediaFileName(), m.getMediaDurationMs(), m.getWaveform(),
                         m.isEdited(), m.isDeleted(), m.getGroupId(), m.isForwarded(),
                         attachmentsByMessage.getOrDefault(m.getMessageId(), List.of()),
                         m.getReplyToMessageId(), m.getReplyToConversationId(), m.getReplyToSenderId(),
