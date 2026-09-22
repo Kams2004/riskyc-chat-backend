@@ -19,3 +19,14 @@ riskyc:
     access-key: riskyc
     secret-key: riskyc-secret
     bucket: riskyc-media
+    # Pinned explicitly so the MinIO SDK never has to auto-discover it via a
+    # GetBucketLocation bootstrap call — that call signs with a hardcoded
+    # "us-east-1" credential scope regardless of this setting, but skipping
+    # it entirely avoids a signature mismatch we hit once media-service's
+    # presigning client started talking to MinIO through an HTTPS reverse
+    # proxy instead of directly (mc's own equivalent discovery worked fine
+    # over the same proxy, isolating the bug to the Java SDK's bootstrap
+    # path specifically, not the proxy or MinIO's own config). Matches
+    # MinIO's own default effective region since RISKYC_MINIO_REGION /
+    # MINIO_REGION aren't set on the server either.
+    region: ${RISKYC_MINIO_REGION:us-east-1}

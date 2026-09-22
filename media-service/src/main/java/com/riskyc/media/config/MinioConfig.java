@@ -26,16 +26,28 @@ public class MinioConfig {
         return MinioClient.builder()
                 .endpoint(properties.endpoint())
                 .credentials(properties.accessKey(), properties.secretKey())
+                .region(properties.region())
                 .build();
     }
 
-    /** Used only to generate presigned URLs, so the host baked into them is one clients can reach. */
+    /**
+     * Used only to generate presigned URLs, so the host baked into them is one
+     * clients can reach. The explicit .region(...) matters here specifically:
+     * without it, the SDK bootstraps via its own GetBucketLocation call
+     * (signed with a hardcoded "us-east-1" scope) before it can sign anything
+     * else — that bootstrap call was failing with SignatureDoesNotMatch once
+     * this client started talking to MinIO through an HTTPS reverse proxy
+     * (confirmed via mc, which succeeded over the same proxy path, so the
+     * proxy and MinIO's own config were never the issue). Passing the region
+     * up front skips that bootstrap call entirely.
+     */
     @Bean
     @Qualifier("presigningMinioClient")
     public MinioClient presigningMinioClient() {
         return MinioClient.builder()
                 .endpoint(properties.publicEndpoint())
                 .credentials(properties.accessKey(), properties.secretKey())
+                .region(properties.region())
                 .build();
     }
 
