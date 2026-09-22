@@ -7,7 +7,9 @@ import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import io.minio.http.Method;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,7 +22,9 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -43,6 +47,24 @@ public class MediaController {
 
     /** Small slack over the client's own 30s status-video cap, not a real limit of its own. */
     private static final long MAX_TRIM_WINDOW_MS = 35_000;
+
+    private static final long DOWNLOAD_URL_EXPIRY_MINUTES = 15;
+    // Cached for less than the actual presigned expiry (see
+    // createDownloadUrl) so a URL handed out right at the edge of the cache
+    // window still has real time left on it once the caller actually uses
+    // it — minting a fresh MinIO presign is a real S3-signing round trip
+    // (not free), and the same objectKey is requested repeatedly in a
+    // normal chat scroll (every viewer of the same shared media, every
+    // re-render of useMediaUrl's own client-side cache miss).
+    private static final long DOWNLOAD_URL_CACHE_MINUTES = 13;
+
+    private record CachedDownloadUrl(String url, Instant expiresAt) {
+        boolean isValid() {
+            return Instant.now().isBefore(expiresAt);
+        }
+    }
+
+    private final ConcurrentHashMap<String, CachedDownloadUrl> downloadUrlCache = new ConcurrentHashMap<>();
 
     private final MinioClient presigningMinioClient;
     /** Docker-internal client (see MinioConfig#minioClient) — trimVideo below is the one place in this service that actually reads/writes object bytes itself, everything else only ever hands out presigned URLs. */
@@ -75,14 +97,27 @@ public class MediaController {
     }
 
     @GetMapping("/{objectKey}/download-url")
-    public DownloadUrlResponse createDownloadUrl(@PathVariable String objectKey) throws Exception {
-        String url = presigningMinioClient.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
-                .method(Method.GET)
-                .bucket(properties.bucket())
-                .object(objectKey)
-                .expiry(15, TimeUnit.MINUTES)
-                .build());
-        return new DownloadUrlResponse(url);
+    public ResponseEntity<DownloadUrlResponse> createDownloadUrl(@PathVariable String objectKey) throws Exception {
+        CachedDownloadUrl cached = downloadUrlCache.get(objectKey);
+        String url;
+        if (cached != null && cached.isValid()) {
+            url = cached.url();
+        } else {
+            url = presigningMinioClient.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
+                    .method(Method.GET)
+                    .bucket(properties.bucket())
+                    .object(objectKey)
+                    .expiry((int) DOWNLOAD_URL_EXPIRY_MINUTES, TimeUnit.MINUTES)
+                    .build());
+            downloadUrlCache.put(objectKey, new CachedDownloadUrl(url, Instant.now().plusSeconds(DOWNLOAD_URL_CACHE_MINUTES * 60)));
+        }
+        // private (not shared/CDN-cacheable — the URL itself is a bearer
+        // credential) lets the browser's own HTTP cache reuse this response
+        // across page reloads too, not just within useMediaUrl's in-memory
+        // session cache on the web client.
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.maxAge(DOWNLOAD_URL_CACHE_MINUTES, TimeUnit.MINUTES).cachePrivate())
+                .body(new DownloadUrlResponse(url));
     }
 
     public record TrimVideoRequest(String objectKey, long startMs, long endMs) {

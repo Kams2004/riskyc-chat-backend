@@ -13,6 +13,17 @@ import java.util.List;
 public interface MessageRepository extends JpaRepository<Message, String> {
     List<Message> findByConversationIdOrderBySentAtAsc(String conversationId);
 
+    /**
+     * Time-windowed page for the web client's 24h-then-12h-increments
+     * loading (see MessageHistoryController#history's since/until params) —
+     * mobile keeps using the unbounded query above since it's offline-first
+     * with its own full local SQLite mirror; web has no local store to speak
+     * of, so unconditionally fetching a whole thread's history on every
+     * visit doesn't scale the same way.
+     */
+    List<Message> findByConversationIdAndSentAtGreaterThanEqualAndSentAtLessThanOrderBySentAtAsc(
+            String conversationId, Instant since, Instant until);
+
     List<Message> findByConversationIdAndMediaTypeInAndDeletedFalseOrderBySentAtDesc(String conversationId,
                                                                                        List<Message.MediaType> mediaTypes);
 

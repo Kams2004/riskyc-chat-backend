@@ -73,11 +73,20 @@ public class MessageHistoryController {
      */
     @GetMapping("/{conversationId}")
     public List<MessageEnvelope> history(@PathVariable String conversationId,
+                                          @RequestParam(required = false) Instant since,
+                                          @RequestParam(required = false) Instant until,
                                           @RequestHeader(value = "Authorization", required = false) String authorization) {
         String callerId = callerIdFrom(authorization);
         requireMembership(conversationId, callerId);
 
-        List<Message> messages = messageRepository.findByConversationIdOrderBySentAtAsc(conversationId);
+        // Both optional, additive — mobile never sends them and keeps getting
+        // the full unbounded history it's always gotten (it's offline-first
+        // with its own local SQLite mirror). The web client uses these for
+        // its 24h-initial / 12h-increment paging (see joyful-tinkering-owl.md).
+        List<Message> messages = (since == null && until == null)
+                ? messageRepository.findByConversationIdOrderBySentAtAsc(conversationId)
+                : messageRepository.findByConversationIdAndSentAtGreaterThanEqualAndSentAtLessThanOrderBySentAtAsc(
+                        conversationId, since != null ? since : Instant.EPOCH, until != null ? until : Instant.now().plusSeconds(60));
         List<String> messageIds = messages.stream().map(Message::getMessageId).toList();
         Set<String> deletedForMe = messageDeletionRepository.findByUserIdAndMessageIdIn(callerId, messageIds).stream()
                 .map(d -> d.getMessageId())
