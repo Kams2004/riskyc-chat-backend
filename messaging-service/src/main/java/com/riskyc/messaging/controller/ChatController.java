@@ -225,6 +225,7 @@ public class ChatController {
                 case "VIDEO" -> "🎥 Video";
                 case "AUDIO" -> "🎤 Voice message";
                 case "FILE" -> "📎 Document";
+                case "STICKER" -> "Sticker";
                 default -> "New message";
             };
         }

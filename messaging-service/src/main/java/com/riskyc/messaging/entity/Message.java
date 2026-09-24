@@ -22,7 +22,7 @@ public class Message {
     // native Postgres enum type) — adding VIDEO is a zero-migration change.
     // Was missing entirely until now despite ChatController.previewFor
     // already having a dead "VIDEO" case that could never actually fire.
-    public enum MediaType { IMAGE, VIDEO, FILE, AUDIO, CALL }
+    public enum MediaType { IMAGE, VIDEO, FILE, AUDIO, CALL, STICKER }
 
     @Id
     @Column(name = "message_id")
