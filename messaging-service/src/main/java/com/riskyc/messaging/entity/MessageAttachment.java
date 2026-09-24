@@ -55,12 +55,17 @@ public class MessageAttachment {
     @Column(name = "media_file_size")
     private Long mediaFileSize;
 
+    // Opaque drawing/text-overlay JSON — same convention as Message.overlayJson,
+    // per-item here since each gallery photo can be edited independently.
+    @Column(name = "overlay_json", columnDefinition = "text")
+    private String overlayJson;
+
     protected MessageAttachment() {
         // JPA
     }
 
     public MessageAttachment(String messageId, int position, Message.MediaType mediaType, String mediaObjectKey,
-                              String mediaFileName, Integer mediaDurationMs, Long mediaFileSize) {
+                              String mediaFileName, Integer mediaDurationMs, Long mediaFileSize, String overlayJson) {
         this.messageId = messageId;
         this.position = position;
         this.mediaType = mediaType;
@@ -68,6 +73,7 @@ public class MessageAttachment {
         this.mediaFileName = mediaFileName;
         this.mediaDurationMs = mediaDurationMs;
         this.mediaFileSize = mediaFileSize;
+        this.overlayJson = overlayJson;
     }
 
     public Long getId() {
@@ -100,5 +106,9 @@ public class MessageAttachment {
 
     public Long getMediaFileSize() {
         return mediaFileSize;
+    }
+
+    public String getOverlayJson() {
+        return overlayJson;
     }
 }

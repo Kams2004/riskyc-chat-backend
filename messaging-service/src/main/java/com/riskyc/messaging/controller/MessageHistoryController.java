@@ -205,7 +205,7 @@ public class MessageHistoryController {
 
     private AttachmentDto toAttachmentDto(MessageAttachment a) {
         return new AttachmentDto(a.getPosition(), a.getMediaType().name(), a.getMediaObjectKey(), a.getMediaFileName(),
-                a.getMediaDurationMs(), a.getMediaFileSize());
+                a.getMediaDurationMs(), a.getMediaFileSize(), a.getOverlayJson());
     }
 
     private void requireMembership(String conversationId, String callerId) {

@@ -8,6 +8,8 @@ public record AttachmentDto(
         String mediaFileName,
         Integer mediaDurationMs,
         /** Bytes — client-supplied at send time (it already has the file in hand pre-upload), never re-derived server-side. Null for an item sent before this field existed. Feeds the combined-size "Download · N photos" gate shown before a multi-item gallery has been fetched. */
-        Long mediaFileSize
+        Long mediaFileSize,
+        /** Opaque drawing/text-overlay JSON for an IMAGE gallery item — same convention as Message.overlayJson, per-item here since each gallery photo can be edited independently. Null for a VIDEO item or one without an overlay. */
+        String overlayJson
 ) {
 }
