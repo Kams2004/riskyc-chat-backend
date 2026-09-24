@@ -83,6 +83,10 @@ services:
       RISKYC_SYSTEM_ACCOUNT_DESCRIPTION: ${RISKYC_SYSTEM_ACCOUNT_DESCRIPTION:-}
       RISKYC_SYSTEM_ACCOUNT_WEBSITE_URL: ${RISKYC_SYSTEM_ACCOUNT_WEBSITE_URL:-}
       RISKYC_MESSAGING_SERVICE_INTERNAL_URL: ${RISKYC_MESSAGING_SERVICE_INTERNAL_URL:-http://messaging-service:8082}
+      # Blank by default (no update prompt) until deliberately set after a
+      # new Play Store release — see AppVersionController's own comment.
+      RISKYC_LATEST_ANDROID_VERSION: ${RISKYC_LATEST_ANDROID_VERSION:-}
+      RISKYC_MIN_SUPPORTED_ANDROID_VERSION: ${RISKYC_MIN_SUPPORTED_ANDROID_VERSION:-}
     depends_on:
       - postgres
 

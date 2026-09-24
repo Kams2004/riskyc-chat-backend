@@ -41,6 +41,15 @@ riskyc:
     # disables the check for local dev, same blank-default pattern already
     # used for the SMS/mail credentials below.
     api-key: ${RISKYC_INTERNAL_API_KEY:}
+  app-version:
+    # Bumped manually (env var, no redeploy of app code needed) each time a
+    # new build is published to the Play Store — lets the mobile app prompt
+    # to update instead of relying solely on the Play Store's own auto-update,
+    # which a user can have disabled or delayed. Blank means "no check" —
+    # the mobile client never prompts when either value is unset, so this
+    # is safe to leave unconfigured until someone deliberately turns it on.
+    latest-android: ${RISKYC_LATEST_ANDROID_VERSION:}
+    min-supported-android: ${RISKYC_MIN_SUPPORTED_ANDROID_VERSION:}
   system-account:
     # A special identifier that, when submitted as the "email" to
     # POST /api/auth/otp/request, logs straight into the RiskyC Fashion
