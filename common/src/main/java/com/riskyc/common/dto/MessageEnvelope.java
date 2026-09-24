@@ -28,6 +28,8 @@ public record MessageEnvelope(
         Integer mediaDurationMs,
         /** Comma-separated normalized amplitude samples for an AUDIO message — see Message.java's own field comment. Null for every non-voice message. */
         String waveform,
+        /** Opaque drawing/text-overlay JSON for an IMAGE message — see Message.java's own field comment. Null for every message without one. */
+        String overlayJson,
         boolean edited,
         boolean deleted,
         String groupId,

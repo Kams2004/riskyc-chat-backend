@@ -138,6 +138,7 @@ public class ChatController {
             message.setMediaFileName(inbound.mediaFileName());
             message.setMediaDurationMs(inbound.mediaDurationMs());
             message.setWaveform(inbound.waveform());
+            message.setOverlayJson(inbound.overlayJson());
         }
         // A forward IS a send (same validation/broadcast/push-notification
         // logic, just a fresh messageId in a possibly different
@@ -171,7 +172,7 @@ public class ChatController {
         MessageEnvelope outbound = new MessageEnvelope(messageId, inbound.conversationId(),
                 inbound.senderId(), message.getRecipientId(), inbound.ciphertext(), sentAt,
                 message.getStatus().name(), inbound.mediaType(), inbound.mediaObjectKey(),
-                inbound.mediaFileName(), inbound.mediaDurationMs(), inbound.waveform(), false, false, inbound.groupId(),
+                inbound.mediaFileName(), inbound.mediaDurationMs(), inbound.waveform(), inbound.overlayJson(), false, false, inbound.groupId(),
                 inbound.forwarded(), attachmentDtos, inbound.replyToMessageId(), inbound.replyToConversationId(),
                 inbound.replyToSenderId(), inbound.replyToSnippet(), false, null,
                 inbound.senderDisplayName(), message.getExpiresAt(), false,

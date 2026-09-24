@@ -79,6 +79,18 @@ public class Message {
     @Column(name = "waveform", length = 1000)
     private String waveform;
 
+    // Opaque client-authored JSON blob (freehand drawing strokes + an
+    // optional text-overlay label drawn on top of an IMAGE message) — same
+    // shape and same "stored and echoed back as-is, never parsed server-side"
+    // convention as StatusPost.overlayJson. Composited onto the image at
+    // VIEW time on the client (an SVG/Skia overlay, not baked into the
+    // image's own pixels) — a crop or rotate, unlike drawing, IS baked into
+    // the uploaded image itself client-side before it ever reaches here, so
+    // this field only ever carries drawing/text. Null for every non-image
+    // message and for an image sent before this field existed.
+    @Column(name = "overlay_json", columnDefinition = "text")
+    private String overlayJson;
+
     // Only ever set on a group-call log entry (mediaType=CALL, groupId
     // non-null) — how many people were in the call, so the client can render
     // "Group call · 4 people · 12m" without needing a separate lookup. Null
@@ -261,6 +273,14 @@ public class Message {
 
     public void setWaveform(String waveform) {
         this.waveform = waveform;
+    }
+
+    public String getOverlayJson() {
+        return overlayJson;
+    }
+
+    public void setOverlayJson(String overlayJson) {
+        this.overlayJson = overlayJson;
     }
 
     public Integer getMediaParticipantCount() {

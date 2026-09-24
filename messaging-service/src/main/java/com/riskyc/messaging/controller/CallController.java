@@ -284,7 +284,7 @@ public class CallController {
 
         MessageEnvelope envelope = new MessageEnvelope(callLog.getMessageId(), conversationId, call.getCallerId(),
                 call.getCalleeId(), callLog.getCiphertext(), callLog.getSentAt(), callLog.getStatus().name(),
-                "CALL", null, callLog.getMediaFileName(), callLog.getMediaDurationMs(), null, false, false, null, false,
+                "CALL", null, callLog.getMediaFileName(), callLog.getMediaDurationMs(), null, null, false, false, null, false,
                 java.util.List.of(), null, null, null, null, false, null, null, null, false, null, null);
         messagingTemplate.convertAndSend("/topic/conversation." + conversationId, envelope);
         messagingTemplate.convertAndSendToUser(call.getCallerId(), "/queue/messages", envelope);

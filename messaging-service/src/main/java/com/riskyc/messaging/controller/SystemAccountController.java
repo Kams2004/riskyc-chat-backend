@@ -85,7 +85,7 @@ public class SystemAccountController {
 
         MessageEnvelope outbound = new MessageEnvelope(messageId, request.conversationId(), request.senderId(),
                 request.recipientId(), request.text(), sentAt, message.getStatus().name(), null, null, null, null,
-                null, false, false, null, false, List.of(), null, null, null, null, false, null,
+                null, null, false, false, null, false, List.of(), null, null, null, null, false, null,
                 request.senderDisplayName(), null, false, null, null);
         messagingTemplate.convertAndSend("/topic/conversation." + request.conversationId(), outbound);
         messagingTemplate.convertAndSendToUser(request.recipientId(), "/queue/messages", outbound);
@@ -157,7 +157,7 @@ public class SystemAccountController {
 
             MessageEnvelope outbound = new MessageEnvelope(messageId, conversationId, callerId, recipientId,
                     message.getCiphertext(), sentAt, message.getStatus().name(), request.mediaType(),
-                    request.mediaObjectKey(), request.mediaFileName(), request.mediaDurationMs(), null, false, false,
+                    request.mediaObjectKey(), request.mediaFileName(), request.mediaDurationMs(), null, null, false, false,
                     null, false, List.of(), null, null, null, null, false, null, request.senderDisplayName(), null,
                     false, null, null);
             messagingTemplate.convertAndSend("/topic/conversation." + conversationId, outbound);
