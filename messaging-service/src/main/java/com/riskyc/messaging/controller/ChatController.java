@@ -162,7 +162,7 @@ public class ChatController {
             List<AttachmentDto> dtos = new ArrayList<>();
             for (AttachmentDto a : inbound.attachments()) {
                 rows.add(new MessageAttachment(messageId, a.position(), Message.MediaType.valueOf(a.mediaType()),
-                        a.mediaObjectKey(), a.mediaFileName(), a.mediaDurationMs()));
+                        a.mediaObjectKey(), a.mediaFileName(), a.mediaDurationMs(), a.mediaFileSize()));
                 dtos.add(a);
             }
             messageAttachmentRepository.saveAll(rows);

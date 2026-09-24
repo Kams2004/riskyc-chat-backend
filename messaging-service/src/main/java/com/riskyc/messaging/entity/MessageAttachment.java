@@ -49,18 +49,25 @@ public class MessageAttachment {
     @Column(name = "media_duration_ms")
     private Integer mediaDurationMs;
 
+    // Bytes — client-supplied at send time (see AttachmentDto's own field
+    // comment). Feeds the combined-size download gate shown before a
+    // multi-item gallery has actually been fetched.
+    @Column(name = "media_file_size")
+    private Long mediaFileSize;
+
     protected MessageAttachment() {
         // JPA
     }
 
     public MessageAttachment(String messageId, int position, Message.MediaType mediaType, String mediaObjectKey,
-                              String mediaFileName, Integer mediaDurationMs) {
+                              String mediaFileName, Integer mediaDurationMs, Long mediaFileSize) {
         this.messageId = messageId;
         this.position = position;
         this.mediaType = mediaType;
         this.mediaObjectKey = mediaObjectKey;
         this.mediaFileName = mediaFileName;
         this.mediaDurationMs = mediaDurationMs;
+        this.mediaFileSize = mediaFileSize;
     }
 
     public Long getId() {
@@ -89,5 +96,9 @@ public class MessageAttachment {
 
     public Integer getMediaDurationMs() {
         return mediaDurationMs;
+    }
+
+    public Long getMediaFileSize() {
+        return mediaFileSize;
     }
 }

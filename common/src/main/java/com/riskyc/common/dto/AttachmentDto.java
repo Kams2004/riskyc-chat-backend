@@ -6,6 +6,8 @@ public record AttachmentDto(
         String mediaType,
         String mediaObjectKey,
         String mediaFileName,
-        Integer mediaDurationMs
+        Integer mediaDurationMs,
+        /** Bytes — client-supplied at send time (it already has the file in hand pre-upload), never re-derived server-side. Null for an item sent before this field existed. Feeds the combined-size "Download · N photos" gate shown before a multi-item gallery has been fetched. */
+        Long mediaFileSize
 ) {
 }
