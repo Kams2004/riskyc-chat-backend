@@ -3,9 +3,11 @@ package com.riskyc.messaging.controller;
 import com.riskyc.common.security.JwtIssuer;
 import com.riskyc.messaging.security.RevokedJtiCache;
 import com.riskyc.messaging.dto.ConversationSummary;
+import com.riskyc.messaging.entity.AutoDownloadDisabled;
 import com.riskyc.messaging.entity.DisappearingMessageSettings;
 import com.riskyc.messaging.entity.GroupMember;
 import com.riskyc.messaging.entity.MutedConversation;
+import com.riskyc.messaging.repository.AutoDownloadDisabledRepository;
 import com.riskyc.messaging.repository.DisappearingMessageSettingsRepository;
 import com.riskyc.messaging.repository.GroupMemberRepository;
 import com.riskyc.messaging.repository.MessageRepository;
@@ -50,6 +52,7 @@ public class ConversationController {
     private final GroupMemberRepository groupMemberRepository;
     private final MutedConversationRepository mutedConversationRepository;
     private final DisappearingMessageSettingsRepository disappearingMessageSettingsRepository;
+    private final AutoDownloadDisabledRepository autoDownloadDisabledRepository;
     private final SimpMessagingTemplate messagingTemplate;
     private final JwtIssuer jwtIssuer;
     private final RevokedJtiCache revokedJtiCache;
@@ -57,12 +60,14 @@ public class ConversationController {
     public ConversationController(MessageRepository messageRepository, GroupMemberRepository groupMemberRepository,
                                    MutedConversationRepository mutedConversationRepository,
                                    DisappearingMessageSettingsRepository disappearingMessageSettingsRepository,
+                                   AutoDownloadDisabledRepository autoDownloadDisabledRepository,
                                    SimpMessagingTemplate messagingTemplate, JwtIssuer jwtIssuer,
                                    RevokedJtiCache revokedJtiCache) {
         this.messageRepository = messageRepository;
         this.groupMemberRepository = groupMemberRepository;
         this.mutedConversationRepository = mutedConversationRepository;
         this.disappearingMessageSettingsRepository = disappearingMessageSettingsRepository;
+        this.autoDownloadDisabledRepository = autoDownloadDisabledRepository;
         this.messagingTemplate = messagingTemplate;
         this.jwtIssuer = jwtIssuer;
         this.revokedJtiCache = revokedJtiCache;
@@ -100,10 +105,10 @@ public class ConversationController {
         return summaries;
     }
 
-    public record ConversationSettingsResult(boolean muted, Integer disappearingMessageSeconds) {
+    public record ConversationSettingsResult(boolean muted, Integer disappearingMessageSeconds, boolean autoDownloadMedia) {
     }
 
-    /** Single-conversation counterpart to list()'s bulk sync — the thread screen's own initial fetch for mute/disappearing state, rather than searching the whole list for one entry. */
+    /** Single-conversation counterpart to list()'s bulk sync — the thread screen's own initial fetch for mute/disappearing/auto-download state, rather than searching the whole list for one entry. */
     @GetMapping("/{conversationId}/settings")
     public ConversationSettingsResult settings(@PathVariable String conversationId,
                                                 @RequestHeader(value = "Authorization", required = false) String authorization) {
@@ -112,7 +117,31 @@ public class ConversationController {
         Integer seconds = disappearingMessageSettingsRepository.findById(conversationId)
                 .map(DisappearingMessageSettings::getDurationSeconds)
                 .orElse(null);
-        return new ConversationSettingsResult(muted, seconds);
+        boolean autoDownloadMedia = !autoDownloadDisabledRepository.existsByUserIdAndConversationId(userId, conversationId);
+        return new ConversationSettingsResult(muted, seconds, autoDownloadMedia);
+    }
+
+    public record AutoDownloadRequest(boolean autoDownloadMedia) {
+    }
+
+    /**
+     * Purely a per-viewer download-gate preference — never affects what the
+     * server stores or sends, only whether MessageAttachmentGrid/single-image
+     * tiles resolve their presigned URL and start fetching bytes the moment
+     * they scroll into view, or wait behind an explicit tap (see the size-
+     * labeled download gate already built for multi-item galleries — this
+     * setting is what makes that gate apply to every image/video, not just
+     * a gallery send, when the viewer has turned auto-download off).
+     */
+    @PutMapping("/{conversationId}/auto-download")
+    public void setAutoDownload(@PathVariable String conversationId, @RequestBody AutoDownloadRequest request,
+                                 @RequestHeader(value = "Authorization", required = false) String authorization) {
+        String userId = callerIdFrom(authorization);
+        if (request.autoDownloadMedia()) {
+            autoDownloadDisabledRepository.deleteByUserIdAndConversationId(userId, conversationId);
+        } else if (!autoDownloadDisabledRepository.existsByUserIdAndConversationId(userId, conversationId)) {
+            autoDownloadDisabledRepository.save(new AutoDownloadDisabled(userId, conversationId, Instant.now()));
+        }
     }
 
     public record MuteRequest(boolean muted) {

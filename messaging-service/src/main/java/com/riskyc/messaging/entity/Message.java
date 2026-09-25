@@ -71,6 +71,10 @@ public class Message {
     @Column(name = "media_duration_ms")
     private Integer mediaDurationMs;
 
+    /** Bytes, client-supplied at send time — same field AttachmentDto already carries for gallery items; this is its single-attachment-path counterpart, feeding the auto-download-off download gate's size label. Null for a message sent before this field existed. */
+    @Column(name = "media_file_size")
+    private Long mediaFileSize;
+
     // Comma-separated normalized amplitude samples (0-100 ints) for an AUDIO
     // message — real data captured live during recording (see mobile's
     // VoiceRecorder), not derived server-side. Null for every non-voice
@@ -265,6 +269,14 @@ public class Message {
 
     public void setMediaDurationMs(Integer mediaDurationMs) {
         this.mediaDurationMs = mediaDurationMs;
+    }
+
+    public Long getMediaFileSize() {
+        return mediaFileSize;
+    }
+
+    public void setMediaFileSize(Long mediaFileSize) {
+        this.mediaFileSize = mediaFileSize;
     }
 
     public String getWaveform() {

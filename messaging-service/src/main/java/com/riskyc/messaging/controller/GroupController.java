@@ -246,7 +246,7 @@ public class GroupController {
 
         MessageEnvelope envelope = new MessageEnvelope(messageId, groupId, senderId, groupId, sentinelCiphertext,
                 sentAt, message.getStatus().name(), null, null, null, null, null, null, false, false, groupId, false,
-                List.of(), null, null, null, null, false, null, null, null, true, null, null);
+                List.of(), null, null, null, null, false, null, null, null, true, null, null, null);
         messagingTemplate.convertAndSend("/topic/conversation." + groupId, envelope);
         for (GroupMember member : memberRepository.findByGroupId(groupId)) {
             if (!member.getUserId().equals(senderId)) {

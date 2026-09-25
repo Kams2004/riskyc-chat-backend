@@ -59,6 +59,8 @@ public record MessageEnvelope(
         boolean system,
         /** Both null unless this message is a reply to a status — see Message.java's own field comment. */
         String replyToStatusId,
-        String replyToStatusOwnerId
+        String replyToStatusOwnerId,
+        /** Bytes, client-supplied at send time — see Message.java's own field comment. Null for a message sent before this field existed, or one with no single-attachment media at all. */
+        Long mediaFileSize
 ) {
 }
