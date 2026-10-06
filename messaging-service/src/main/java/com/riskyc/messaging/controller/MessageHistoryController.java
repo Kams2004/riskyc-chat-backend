@@ -112,7 +112,8 @@ public class MessageHistoryController {
                         m.getReplyToMessageId(), m.getReplyToConversationId(), m.getReplyToSenderId(),
                         m.getReplyToSnippet(), m.isPinned(), m.getMediaParticipantCount(),
                         null, m.getExpiresAt(), m.isSystem(), m.getReplyToStatusId(), m.getReplyToStatusOwnerId(),
-                        m.getMediaFileSize()))
+                        m.getMediaFileSize(), m.getInviteGroupId(), m.getInviteGroupName(), m.getInviteGroupAvatarObjectKey(),
+                        m.getInviteInvitationId(), m.getInviteStatus() != null ? m.getInviteStatus().name() : null))
                 .toList();
     }
 

@@ -11,6 +11,7 @@ import com.riskyc.messaging.repository.GroupInvitationRepository;
 import com.riskyc.messaging.repository.GroupMemberRepository;
 import com.riskyc.messaging.repository.MessageRepository;
 import com.riskyc.messaging.security.RevokedJtiCache;
+import com.riskyc.messaging.service.GroupInvitationMessageService;
 import com.riskyc.messaging.service.PushNotificationService;
 import org.springframework.http.HttpStatus;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -26,7 +27,6 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -58,12 +58,14 @@ public class GroupController {
     private final MessageRepository messageRepository;
     private final SimpMessagingTemplate messagingTemplate;
     private final PushNotificationService pushNotificationService;
+    private final GroupInvitationMessageService invitationMessageService;
     private final JwtIssuer jwtIssuer;
     private final RevokedJtiCache revokedJtiCache;
 
     public GroupController(GroupConversationRepository groupRepository, GroupMemberRepository memberRepository,
                             GroupInvitationRepository invitationRepository, MessageRepository messageRepository,
                             SimpMessagingTemplate messagingTemplate, PushNotificationService pushNotificationService,
+                            GroupInvitationMessageService invitationMessageService,
                             JwtIssuer jwtIssuer, RevokedJtiCache revokedJtiCache) {
         this.groupRepository = groupRepository;
         this.memberRepository = memberRepository;
@@ -71,6 +73,7 @@ public class GroupController {
         this.messageRepository = messageRepository;
         this.messagingTemplate = messagingTemplate;
         this.pushNotificationService = pushNotificationService;
+        this.invitationMessageService = invitationMessageService;
         this.jwtIssuer = jwtIssuer;
         this.revokedJtiCache = revokedJtiCache;
     }
@@ -96,10 +99,6 @@ public class GroupController {
                                List<String> pendingInviteeIds) {
     }
 
-    public record InvitationResult(Long invitationId, String groupId, String groupName, String groupAvatarObjectKey,
-                                    String inviterId, String createdAt) {
-    }
-
     @PostMapping
     public GroupResult create(@RequestHeader(value = "Authorization", required = false) String authorization,
                                @RequestBody CreateGroupRequest request) {
@@ -112,7 +111,7 @@ public class GroupController {
         memberRepository.save(new GroupMember(groupId, callerId, GroupMember.Role.ADMIN, Instant.now()));
         for (String memberId : request.memberIds()) {
             if (!memberId.equals(callerId)) {
-                inviteOne(groupId, callerId, memberId, group.getName());
+                inviteOne(group, callerId, memberId);
             }
         }
         return toResult(group);
@@ -146,13 +145,14 @@ public class GroupController {
         requireAdmin(groupId, callerId);
         for (String memberId : request.memberIds()) {
             if (memberRepository.findByGroupIdAndUserId(groupId, memberId).isEmpty()) {
-                inviteOne(groupId, callerId, memberId, group.getName());
+                inviteOne(group, callerId, memberId);
             }
         }
         return toResult(group);
     }
 
-    private void inviteOne(String groupId, String inviterId, String inviteeId, String groupName) {
+    private void inviteOne(GroupConversation group, String inviterId, String inviteeId) {
+        String groupId = group.getId();
         GroupInvitation invitation = invitationRepository.findByGroupIdAndInviteeId(groupId, inviteeId)
                 .orElseGet(() -> new GroupInvitation(groupId, inviterId, inviteeId, GroupInvitation.Status.PENDING, Instant.now()));
         if (invitation.getStatus() == GroupInvitation.Status.PENDING) {
@@ -167,30 +167,15 @@ public class GroupController {
         invitation.setRespondedAt(null);
         invitationRepository.save(invitation);
 
-        messagingTemplate.convertAndSendToUser(inviteeId, "/queue/group-invitations", Map.of("groupId", groupId));
-        pushNotificationService.sendToUser(inviteeId, groupName, "You've been invited to join this group", "messages-v3",
-                Map.of("type", "group-invitation", "groupId", groupId));
-    }
-
-    /** My own outstanding invitations, across every group. */
-    @GetMapping("/invitations")
-    public List<InvitationResult> myInvitations(@RequestHeader(value = "Authorization", required = false) String authorization) {
-        String callerId = callerIdFrom(authorization);
-        List<GroupInvitation> invitations = invitationRepository.findByInviteeIdAndStatus(callerId, GroupInvitation.Status.PENDING);
-        Map<String, GroupConversation> groupsById = new LinkedHashMap<>();
-        for (GroupInvitation inv : invitations) {
-            if (!groupsById.containsKey(inv.getGroupId())) {
-                groupRepository.findById(inv.getGroupId()).ifPresent(g -> groupsById.put(inv.getGroupId(), g));
-            }
-        }
-        return invitations.stream()
-                .map(inv -> {
-                    GroupConversation group = groupsById.get(inv.getGroupId());
-                    return new InvitationResult(inv.getId(), inv.getGroupId(),
-                            group != null ? group.getName() : null, group != null ? group.getAvatarObjectKey() : null,
-                            inv.getInviterId(), inv.getCreatedAt().toString());
-                })
-                .toList();
+        // Shows up as an inline invite card in the inviter/invitee's own 1:1
+        // conversation (see GroupInvitationMessageService) rather than a
+        // dedicated invitations screen — tapping the resulting push
+        // notification should land on that same conversation, hence "message"
+        // here, not a bespoke notification type.
+        invitationMessageService.postInviteMessage(invitation, group.getName(), group.getAvatarObjectKey());
+        String conversationId = GroupInvitationMessageService.oneToOneConversationId(inviterId, inviteeId);
+        pushNotificationService.sendToUser(inviteeId, group.getName(), "Invited you to join this group", "messages-v3",
+                Map.of("type", "message", "conversationId", conversationId, "senderId", inviterId));
     }
 
     @PostMapping("/invitations/{invitationId}/accept")
@@ -210,6 +195,7 @@ public class GroupController {
         }
 
         postSystemMessage(group.getId(), callerId, SYSTEM_MEMBER_JOINED);
+        invitationMessageService.updateInviteMessageStatus(invitation.getId(), GroupInvitation.Status.ACCEPTED);
         return toResult(group);
     }
 
@@ -221,6 +207,7 @@ public class GroupController {
         invitation.setStatus(GroupInvitation.Status.DECLINED);
         invitation.setRespondedAt(Instant.now());
         invitationRepository.save(invitation);
+        invitationMessageService.updateInviteMessageStatus(invitation.getId(), GroupInvitation.Status.DECLINED);
     }
 
     private GroupInvitation requireOwnPendingInvitation(Long invitationId, String callerId) {
@@ -228,6 +215,9 @@ public class GroupController {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such invitation"));
         if (!invitation.getInviteeId().equals(callerId)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Not your invitation");
+        }
+        if (invitation.getStatus() == GroupInvitation.Status.EXPIRED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This invitation has expired");
         }
         if (invitation.getStatus() != GroupInvitation.Status.PENDING) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "This invitation was already responded to");
@@ -246,7 +236,8 @@ public class GroupController {
 
         MessageEnvelope envelope = new MessageEnvelope(messageId, groupId, senderId, groupId, sentinelCiphertext,
                 sentAt, message.getStatus().name(), null, null, null, null, null, null, false, false, groupId, false,
-                List.of(), null, null, null, null, false, null, null, null, true, null, null, null);
+                List.of(), null, null, null, null, false, null, null, null, true, null, null, null,
+                null, null, null, null, null);
         messagingTemplate.convertAndSend("/topic/conversation." + groupId, envelope);
         for (GroupMember member : memberRepository.findByGroupId(groupId)) {
             if (!member.getUserId().equals(senderId)) {

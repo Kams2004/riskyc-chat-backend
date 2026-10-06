@@ -239,7 +239,13 @@ public class CallController {
         callRepository.findById(inbound.callId()).ifPresent(call -> {
             String fromUserId = principal.getName();
             if (call.getStatus() == Call.CallStatus.RINGING) {
-                call.setStatus("declined".equals(inbound.reason()) ? Call.CallStatus.DECLINED : Call.CallStatus.MISSED);
+                if ("busy".equals(inbound.reason())) {
+                    call.setStatus(Call.CallStatus.BUSY);
+                } else if ("declined".equals(inbound.reason())) {
+                    call.setStatus(Call.CallStatus.DECLINED);
+                } else {
+                    call.setStatus(Call.CallStatus.MISSED);
+                }
             } else {
                 call.setStatus(Call.CallStatus.ENDED);
             }

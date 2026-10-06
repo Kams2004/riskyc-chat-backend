@@ -19,7 +19,11 @@ public class Call {
 
     public enum CallType { AUDIO, VIDEO }
 
-    public enum CallStatus { RINGING, ACCEPTED, DECLINED, MISSED, ENDED }
+    // BUSY: the callee's own device auto-declined because it was already on
+    // another call (1:1 or group) — distinct from DECLINED (a person
+    // actively rejecting a call they saw ring) so both sides' call log/
+    // history can tell the caller WHY instead of a generic missed call.
+    public enum CallStatus { RINGING, ACCEPTED, DECLINED, MISSED, BUSY, ENDED }
 
     @Id
     @Column(name = "id")

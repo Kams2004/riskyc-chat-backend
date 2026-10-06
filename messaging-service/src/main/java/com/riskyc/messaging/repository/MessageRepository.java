@@ -9,9 +9,20 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 public interface MessageRepository extends JpaRepository<Message, String> {
     List<Message> findByConversationIdOrderBySentAtAsc(String conversationId);
+
+    /**
+     * The live GROUP_INVITE card for a given GroupInvitation row —
+     * "First...OrderBySentAtDesc" because re-inviting after a DECLINED/EXPIRED
+     * response posts a FRESH card while the old one stays in history showing
+     * its resolved status (see GroupInvitationMessageService); there can be
+     * more than one message tied to the same invitationId over time, and
+     * only the newest is still PENDING/live.
+     */
+    Optional<Message> findFirstByInviteInvitationIdOrderBySentAtDesc(Long inviteInvitationId);
 
     /**
      * Time-windowed page for the web client's 24h-then-12h-increments

@@ -25,7 +25,7 @@ import java.time.Instant;
 @Table(name = "group_invitation", uniqueConstraints = @UniqueConstraint(columnNames = { "group_id", "invitee_id" }))
 public class GroupInvitation {
 
-    public enum Status { PENDING, ACCEPTED, DECLINED }
+    public enum Status { PENDING, ACCEPTED, DECLINED, EXPIRED }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

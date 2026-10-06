@@ -1,5 +1,6 @@
 package com.riskyc.auth.service;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -17,11 +18,17 @@ import java.util.concurrent.ConcurrentHashMap;
  * In-memory, matching OtpService's own documented MVP-stage stance (fine for
  * one replica; move to Redis with TTL before scaling out) — same tradeoff,
  * same place in the codebase to revisit it.
+ *
+ * The two values below are overridable via env var specifically so a local
+ * dev/QA backend (SmsOtpSender already falls back to logging instead of
+ * real SMS when unconfigured — see its own doc comment) can loosen them for
+ * repeated manual testing without touching the hardcoded production
+ * defaults, which stay exactly as-is for anyone not setting the var.
  */
 @Service
 public class OtpRateLimiter {
 
-    private static final Duration IDENTIFIER_COOLDOWN = Duration.ofSeconds(45);
+    private final Duration identifierCooldown;
     private static final Duration IP_WINDOW = Duration.ofHours(1);
     private static final int IP_MAX_REQUESTS = 12;
 
@@ -31,7 +38,13 @@ public class OtpRateLimiter {
     // told to switch to email instead, which has no such cap. Resets after
     // a day rather than being a permanent lockout.
     private static final Duration SMS_TRIAL_WINDOW = Duration.ofHours(24);
-    private static final int SMS_MAX_TRIALS = 2;
+    private final int smsMaxTrials;
+
+    public OtpRateLimiter(@Value("${riskyc.otp.identifier-cooldown-seconds:45}") long identifierCooldownSeconds,
+                           @Value("${riskyc.otp.sms-max-trials:2}") int smsMaxTrials) {
+        this.identifierCooldown = Duration.ofSeconds(identifierCooldownSeconds);
+        this.smsMaxTrials = smsMaxTrials;
+    }
 
     private record IpWindow(int count, Instant windowStart) {
     }
@@ -48,7 +61,7 @@ public class OtpRateLimiter {
         Instant now = Instant.now();
         Instant[] rejected = {null};
         lastRequestByIdentifier.compute(identifier, (key, last) -> {
-            if (last != null && now.isBefore(last.plus(IDENTIFIER_COOLDOWN))) {
+            if (last != null && now.isBefore(last.plus(identifierCooldown))) {
                 rejected[0] = last;
                 return last;
             }
@@ -82,7 +95,7 @@ public class OtpRateLimiter {
             }
             return new TrialWindow(existing.count() + 1, existing.windowStart());
         });
-        return updated.count() <= SMS_MAX_TRIALS;
+        return updated.count() <= smsMaxTrials;
     }
 
     /**

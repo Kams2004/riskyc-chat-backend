@@ -61,6 +61,12 @@ public record MessageEnvelope(
         String replyToStatusId,
         String replyToStatusOwnerId,
         /** Bytes, client-supplied at send time — see Message.java's own field comment. Null for a message sent before this field existed, or one with no single-attachment media at all. */
-        Long mediaFileSize
+        Long mediaFileSize,
+        /** All five null for every message except mediaType=GROUP_INVITE — see messaging-service's Message.java field comments. */
+        String inviteGroupId,
+        String inviteGroupName,
+        String inviteGroupAvatarObjectKey,
+        Long inviteInvitationId,
+        String inviteStatus
 ) {
 }

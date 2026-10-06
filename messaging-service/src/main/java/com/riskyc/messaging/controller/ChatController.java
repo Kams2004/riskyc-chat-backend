@@ -177,7 +177,8 @@ public class ChatController {
                 inbound.forwarded(), attachmentDtos, inbound.replyToMessageId(), inbound.replyToConversationId(),
                 inbound.replyToSenderId(), inbound.replyToSnippet(), false, null,
                 inbound.senderDisplayName(), message.getExpiresAt(), false,
-                inbound.replyToStatusId(), inbound.replyToStatusOwnerId(), inbound.mediaFileSize());
+                inbound.replyToStatusId(), inbound.replyToStatusOwnerId(), inbound.mediaFileSize(),
+                null, null, null, null, null);
         messagingTemplate.convertAndSend("/topic/conversation." + inbound.conversationId(), outbound);
 
         String previewBody = previewFor(inbound.mediaType(), inbound.ciphertext(), attachmentDtos.size());
@@ -371,7 +372,7 @@ public class ChatController {
             message.setCiphertext(request.newCiphertext());
             message.setEdited(true);
             messageRepository.save(message);
-            MessageMutation mutation = new MessageMutation(request.conversationId(), request.messageId(), request.newCiphertext(), true, false, message.isPinned());
+            MessageMutation mutation = new MessageMutation(request.conversationId(), request.messageId(), request.newCiphertext(), true, false, message.isPinned(), null);
             messagingTemplate.convertAndSend("/topic/conversation." + request.conversationId() + ".mutations", mutation);
             pushMutationToInboxes(message, mutation);
         });
@@ -395,7 +396,7 @@ public class ChatController {
             message.setPinned(request.pinned());
             messageRepository.save(message);
             MessageMutation mutation = new MessageMutation(request.conversationId(), request.messageId(),
-                    message.getCiphertext(), message.isEdited(), message.isDeleted(), message.isPinned());
+                    message.getCiphertext(), message.isEdited(), message.isDeleted(), message.isPinned(), null);
             messagingTemplate.convertAndSend("/topic/conversation." + request.conversationId() + ".mutations", mutation);
             pushMutationToInboxes(message, mutation);
         });
@@ -462,7 +463,7 @@ public class ChatController {
             // Now redundant — everyone loses the message anyway, so any
             // earlier per-user delete-for-me markers for it serve no purpose.
             messageDeletionRepository.deleteByMessageId(request.messageId());
-            MessageMutation mutation = new MessageMutation(request.conversationId(), request.messageId(), null, false, true, message.isPinned());
+            MessageMutation mutation = new MessageMutation(request.conversationId(), request.messageId(), null, false, true, message.isPinned(), null);
             messagingTemplate.convertAndSend("/topic/conversation." + request.conversationId() + ".mutations", mutation);
             pushMutationToInboxes(message, mutation);
         });

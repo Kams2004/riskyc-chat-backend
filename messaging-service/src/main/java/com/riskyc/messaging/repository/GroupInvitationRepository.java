@@ -3,6 +3,7 @@ package com.riskyc.messaging.repository;
 import com.riskyc.messaging.entity.GroupInvitation;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -15,4 +16,7 @@ public interface GroupInvitationRepository extends JpaRepository<GroupInvitation
 
     /** My own pending invitations, across every group — see GroupController#myInvitations. */
     List<GroupInvitation> findByInviteeIdAndStatus(String inviteeId, GroupInvitation.Status status);
+
+    /** Feeds InvitationExpiryJob's sweep — every invite nobody has responded to in 3+ days. */
+    List<GroupInvitation> findByStatusAndCreatedAtBefore(GroupInvitation.Status status, Instant cutoff);
 }

@@ -22,7 +22,11 @@ public class Message {
     // native Postgres enum type) — adding VIDEO is a zero-migration change.
     // Was missing entirely until now despite ChatController.previewFor
     // already having a dead "VIDEO" case that could never actually fire.
-    public enum MediaType { IMAGE, VIDEO, FILE, AUDIO, CALL, STICKER }
+    // GROUP_INVITE renders as an inline invite card (group avatar/name +
+    // accept/decline, or a resolved status) inside the inviter/invitee's 1:1
+    // conversation instead of a separate dedicated screen — see the
+    // invite* fields below and GroupInvitationMessageService.
+    public enum MediaType { IMAGE, VIDEO, FILE, AUDIO, CALL, STICKER, GROUP_INVITE }
 
     @Id
     @Column(name = "message_id")
@@ -188,6 +192,30 @@ public class Message {
 
     @Column(name = "reply_to_status_owner_id")
     private String replyToStatusOwnerId;
+
+    // All null for every message except mediaType=GROUP_INVITE. Denormalized
+    // group name/avatar (same "snapshot at send time" convention as
+    // replyToSnippet above) so the card renders without a client-side group
+    // fetch; inviteInvitationId is the live GroupInvitation row this card
+    // tracks, and inviteStatus is a copy of that row's status kept in sync by
+    // GroupInvitationMessageService whenever it's accepted/declined/expires,
+    // so both the inviter's and invitee's chat bubble update without either
+    // side needing to re-fetch history.
+    @Column(name = "invite_group_id")
+    private String inviteGroupId;
+
+    @Column(name = "invite_group_name")
+    private String inviteGroupName;
+
+    @Column(name = "invite_group_avatar_object_key")
+    private String inviteGroupAvatarObjectKey;
+
+    @Column(name = "invite_invitation_id")
+    private Long inviteInvitationId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "invite_status")
+    private GroupInvitation.Status inviteStatus;
 
     protected Message() {
         // JPA
@@ -405,5 +433,45 @@ public class Message {
 
     public void setReplyToStatusOwnerId(String replyToStatusOwnerId) {
         this.replyToStatusOwnerId = replyToStatusOwnerId;
+    }
+
+    public String getInviteGroupId() {
+        return inviteGroupId;
+    }
+
+    public void setInviteGroupId(String inviteGroupId) {
+        this.inviteGroupId = inviteGroupId;
+    }
+
+    public String getInviteGroupName() {
+        return inviteGroupName;
+    }
+
+    public void setInviteGroupName(String inviteGroupName) {
+        this.inviteGroupName = inviteGroupName;
+    }
+
+    public String getInviteGroupAvatarObjectKey() {
+        return inviteGroupAvatarObjectKey;
+    }
+
+    public void setInviteGroupAvatarObjectKey(String inviteGroupAvatarObjectKey) {
+        this.inviteGroupAvatarObjectKey = inviteGroupAvatarObjectKey;
+    }
+
+    public Long getInviteInvitationId() {
+        return inviteInvitationId;
+    }
+
+    public void setInviteInvitationId(Long inviteInvitationId) {
+        this.inviteInvitationId = inviteInvitationId;
+    }
+
+    public GroupInvitation.Status getInviteStatus() {
+        return inviteStatus;
+    }
+
+    public void setInviteStatus(GroupInvitation.Status inviteStatus) {
+        this.inviteStatus = inviteStatus;
     }
 }

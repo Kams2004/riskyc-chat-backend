@@ -83,6 +83,11 @@ services:
       RISKYC_SYSTEM_ACCOUNT_DESCRIPTION: ${RISKYC_SYSTEM_ACCOUNT_DESCRIPTION:-}
       RISKYC_SYSTEM_ACCOUNT_WEBSITE_URL: ${RISKYC_SYSTEM_ACCOUNT_WEBSITE_URL:-}
       RISKYC_MESSAGING_SERVICE_INTERNAL_URL: ${RISKYC_MESSAGING_SERVICE_INTERNAL_URL:-http://messaging-service:8082}
+      # Local dev/QA override for OtpRateLimiter's two caps — unset, these
+      # fall back to the real 45s/2-trial production defaults (see its own
+      # doc comment); only set these in a local .env for manual testing.
+      RISKYC_OTP_IDENTIFIER_COOLDOWN_SECONDS: ${RISKYC_OTP_IDENTIFIER_COOLDOWN_SECONDS:-45}
+      RISKYC_OTP_SMS_MAX_TRIALS: ${RISKYC_OTP_SMS_MAX_TRIALS:-2}
     depends_on:
       - postgres
 
