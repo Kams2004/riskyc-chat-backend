@@ -7,6 +7,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+import org.hibernate.annotations.ColumnDefault;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -50,7 +51,12 @@ public class User {
     // Admin-moderation state (see admin-service) — a suspended account can't
     // complete a new OTP login (AuthController#verifyOtp) and has every
     // linked device signed out the moment it's suspended (SessionService#revokeAll).
+    // ColumnDefault matters here, not just the Java initializer: without a
+    // DB-level default, Hibernate's ddl-auto=update emits a plain
+    // "ADD COLUMN ... NOT NULL" that Postgres rejects outright against a
+    // table that already has rows (learned the hard way against production).
     @Column(name = "suspended", nullable = false)
+    @ColumnDefault("false")
     private boolean suspended = false;
 
     @Column(name = "suspended_reason", columnDefinition = "text")

@@ -7,6 +7,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+import org.hibernate.annotations.ColumnDefault;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -71,7 +72,12 @@ public class Session {
     // (SessionController#revoke, UserController#deleteMe); the master
     // signing itself out cascades to revoke every sibling session too, so
     // the account is never left masterless for long.
+    // ColumnDefault matters here, not just the constructor assignment: without
+    // a DB-level default, Hibernate's ddl-auto=update emits a plain
+    // "ADD COLUMN ... NOT NULL" that Postgres rejects outright against a
+    // table that already has rows (learned the hard way against production).
     @Column(name = "is_master", nullable = false)
+    @ColumnDefault("false")
     private boolean isMaster;
 
     protected Session() {
