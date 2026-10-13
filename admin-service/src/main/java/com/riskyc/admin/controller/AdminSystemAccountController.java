@@ -5,12 +5,15 @@ import com.riskyc.admin.entity.AdminAccount;
 import com.riskyc.admin.service.AdminAuditLogService;
 import com.riskyc.admin.service.AdminAuthService;
 import com.riskyc.admin.service.AuthServiceClient;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/admin/system-account")
@@ -32,7 +35,14 @@ public class AdminSystemAccountController {
     @GetMapping
     public SystemAccountProfile get(@RequestHeader(value = "Authorization", required = false) String authorization) {
         adminAuthService.callerFrom(authorization);
-        return authServiceClient.getSystemAccountProfile();
+        try {
+            return authServiceClient.getSystemAccountProfile();
+        } catch (HttpClientErrorException.NotFound e) {
+            // auth-service returns 404 when RISKYC_SYSTEM_ACCOUNT_ACCESS_EMAIL isn't
+            // configured — surface that as a clean 404 instead of letting it fall
+            // through as an unexplained 500.
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No official account configured");
+        }
     }
 
     @PutMapping
