@@ -9,46 +9,54 @@
 # run it from THERE. This copy existing inside the repo is a distribution
 # convenience, not where it operates from.
 #
-# Lives ONE LEVEL ABOVE the two deployed repos, expecting this layout:
+# Lives ONE LEVEL ABOVE the three deployed repos, expecting this layout:
 #
 #   riskyc-chat/                     <- "root of the chat project" on the server
 #     riskyc-deploy.sh               <- this file
 #     riskyc-chat-backend/           <- git clone of github.com/Kams2004/riskyc-chat-backend
-#       docker-compose.yml
+#       docker-compose.yml           <-    (includes admin-service — no separate target for it;
+#                                            it deploys as part of "backend")
 #     riskyc-chat-frontend/          <- git clone of github.com/Kams2004/riskyc-chat-frontend
 #       docker-compose.yml
+#     riskyc-front-admin/            <- git clone of github.com/Kams2004/riskyc-front-admin
+#       docker-compose.yml           <-    (the admin DASHBOARD's own frontend — a separate stack
+#                                            from admin-service, which lives inside backend above)
 #
-# It never lives INSIDE either repo on purpose: `git pull` in either clone
-# must never touch, overwrite, or delete it, and it needs to orchestrate
-# both stacks together. Override the paths via RISKYC_BACKEND_DIR /
-# RISKYC_FRONTEND_DIR if your clone directory names differ.
+# It never lives INSIDE any of the three repos on purpose: `git pull` in any
+# clone must never touch, overwrite, or delete it, and it needs to
+# orchestrate all three stacks together. Override the paths via
+# RISKYC_BACKEND_DIR / RISKYC_FRONTEND_DIR / RISKYC_ADMIN_WEB_DIR if your
+# clone directory names differ.
 #
 # Usage:
-#   ./riskyc-deploy.sh start    [backend|frontend|all]   # docker-compose up -d (no rebuild)
-#   ./riskyc-deploy.sh stop     [backend|frontend|all]   # docker-compose down (keeps volumes/data)
-#   ./riskyc-deploy.sh restart  [backend|frontend|all]   # full teardown (removes containers/networks,
-#                                                         # keeps named volumes) + rebuild + start
-#   ./riskyc-deploy.sh pull     [backend|frontend|all]   # git pull --ff-only in the target repo(s)
-#   ./riskyc-deploy.sh deploy   [backend|frontend|all]   # pull, then restart — the one-shot "ship it"
-#   ./riskyc-deploy.sh status                            # docker-compose ps for both stacks
-#   ./riskyc-deploy.sh logs     <backend|frontend> [service] [-f]
-#   ./riskyc-deploy.sh wipe     [backend|frontend|all] --confirm
+#   ./riskyc-deploy.sh start    [backend|frontend|admin-web|all]   # docker-compose up -d (no rebuild)
+#   ./riskyc-deploy.sh stop     [backend|frontend|admin-web|all]   # docker-compose down (keeps volumes/data)
+#   ./riskyc-deploy.sh restart  [backend|frontend|admin-web|all]   # full teardown (removes containers/networks,
+#                                                                   # keeps named volumes) + rebuild + start
+#   ./riskyc-deploy.sh pull     [backend|frontend|admin-web|all]   # git pull --ff-only in the target repo(s)
+#   ./riskyc-deploy.sh deploy   [backend|frontend|admin-web|all]   # pull, then restart — the one-shot "ship it"
+#   ./riskyc-deploy.sh status                                      # docker-compose ps for all three stacks
+#   ./riskyc-deploy.sh logs     <backend|frontend|admin-web> [service] [-f]
+#   ./riskyc-deploy.sh wipe     [backend|frontend|admin-web|all] --confirm
 #                                                         # DESTRUCTIVE: also deletes named volumes
 #                                                         # (Postgres data, MinIO objects, Redis). Only
 #                                                         # for "burn it down and start over" — requires
 #                                                         # --confirm, never runs as part of restart/deploy.
 #
 # Examples:
-#   ./riskyc-deploy.sh deploy backend     # pull latest backend code, rebuild, restart just that stack
-#   ./riskyc-deploy.sh deploy             # same, but for both stacks
+#   ./riskyc-deploy.sh deploy backend     # pull latest backend code (incl. admin-service), rebuild, restart
+#   ./riskyc-deploy.sh deploy admin-web   # pull latest admin dashboard frontend, rebuild, restart just that
+#   ./riskyc-deploy.sh deploy             # same, but for all three stacks
 #   ./riskyc-deploy.sh restart frontend   # redeploy from whatever's already checked out, no git pull
 #   ./riskyc-deploy.sh logs backend messaging-service -f
+#   ./riskyc-deploy.sh logs backend admin-service -f
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 BACKEND_DIR="${RISKYC_BACKEND_DIR:-$SCRIPT_DIR/riskyc-chat-backend}"
 FRONTEND_DIR="${RISKYC_FRONTEND_DIR:-$SCRIPT_DIR/riskyc-chat-frontend}"
+ADMIN_WEB_DIR="${RISKYC_ADMIN_WEB_DIR:-$SCRIPT_DIR/riskyc-front-admin}"
 
 # Prefer the modern "docker compose" plugin, fall back to the classic
 # standalone "docker-compose" binary — whichever this host actually has.
@@ -75,15 +83,16 @@ dir_for() {
   case "$1" in
     backend) echo "$BACKEND_DIR" ;;
     frontend) echo "$FRONTEND_DIR" ;;
-    *) err "Unknown target '$1' — expected 'backend' or 'frontend'"; exit 1 ;;
+    admin-web) echo "$ADMIN_WEB_DIR" ;;
+    *) err "Unknown target '$1' — expected 'backend', 'frontend', or 'admin-web'"; exit 1 ;;
   esac
 }
 
 targets_for() {
   case "${1:-all}" in
-    all) echo "backend frontend" ;;
-    backend|frontend) echo "$1" ;;
-    *) err "Unknown target '$1' — expected 'backend', 'frontend', or 'all'"; exit 1 ;;
+    all) echo "backend frontend admin-web" ;;
+    backend|frontend|admin-web) echo "$1" ;;
+    *) err "Unknown target '$1' — expected 'backend', 'frontend', 'admin-web', or 'all'"; exit 1 ;;
   esac
 }
 
@@ -91,7 +100,7 @@ require_dir() {
   local dir="$1"
   if [[ ! -d "$dir" ]]; then
     err "Expected a repo checkout at: $dir"
-    err "Set RISKYC_BACKEND_DIR / RISKYC_FRONTEND_DIR if your clones live elsewhere."
+    err "Set RISKYC_BACKEND_DIR / RISKYC_FRONTEND_DIR / RISKYC_ADMIN_WEB_DIR if your clones live elsewhere."
     exit 1
   fi
 }
@@ -145,7 +154,7 @@ cmd_deploy() {
 }
 
 cmd_status() {
-  for t in backend frontend; do
+  for t in backend frontend admin-web; do
     local dir; dir="$(dir_for "$t")"
     if [[ -d "$dir" ]]; then
       info "Status: $t"
@@ -158,7 +167,7 @@ cmd_status() {
 
 cmd_logs() {
   local target="${1:-}"
-  [[ -z "$target" ]] && { err "logs needs a target: backend or frontend"; usage; }
+  [[ -z "$target" ]] && { err "logs needs a target: backend, frontend, or admin-web"; usage; }
   local dir; dir="$(dir_for "$target")"
   require_dir "$dir"
   shift
