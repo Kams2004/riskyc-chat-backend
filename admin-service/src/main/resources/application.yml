@@ -1,0 +1,48 @@
+server:
+  port: 8097
+
+spring:
+  application:
+    name: admin-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/riskyc
+    username: riskyc
+    password: riskyc
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+
+riskyc:
+  admin:
+    # Distinct from riskyc.jwt.secret (the regular-user signing key) on
+    # purpose — a regular user's JWT must never verify against this one and
+    # vice versa. Local-dev-only default, same "change-me" convention as
+    # every other secret in this codebase.
+    jwt-secret: ${RISKYC_ADMIN_JWT_SECRET:YWRtaW4tZGV2LXNlY3JldC1kby1ub3QtdXNlLWluLXByb2QtcGxlYXNlLWNoYW5nZS1tZQ==}
+    jwt-ttl-hours: ${RISKYC_ADMIN_JWT_TTL_HOURS:12}
+    default-username: ${RISKYC_ADMIN_DEFAULT_USERNAME:admin}
+    # Blank (the default): AdminAccountSeeder generates a fresh strong
+    # random password on first boot and logs it once — see that class.
+    # Set this to pin a known password instead (e.g. for a reproducible
+    # local dev setup).
+    default-password: ${RISKYC_ADMIN_DEFAULT_PASSWORD:}
+    login-max-attempts: 5
+    login-window-minutes: 15
+  internal:
+    # Reuses the SAME shared secret auth-service/messaging-service/presence-service
+    # already check on their own /internal/** endpoints — admin-service is
+    # just another trusted internal caller, not a new trust domain.
+    api-key: ${RISKYC_INTERNAL_API_KEY:}
+  auth-service:
+    internal-url: ${RISKYC_AUTH_SERVICE_INTERNAL_URL:http://auth-service:8081}
+  messaging-service:
+    internal-url: ${RISKYC_MESSAGING_SERVICE_INTERNAL_URL:http://messaging-service:8082}
+  presence-service:
+    internal-url: ${RISKYC_PRESENCE_SERVICE_INTERNAL_URL:http://presence-service:8084}
+  admin-cors:
+    # Deliberately its OWN property, never riskyc.cors.allowed-origins (the
+    # one auth/messaging/media/presence already share) — appending the
+    # admin frontend's origin to that shared list would grant it CORS
+    # access to every user-facing service too, which isn't wanted.
+    allowed-origins: ${RISKYC_ADMIN_CORS_ALLOWED_ORIGINS:http://localhost:5174,http://167.86.120.214:8086}

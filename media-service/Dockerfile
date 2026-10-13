@@ -6,6 +6,7 @@ COPY auth-service ./auth-service
 COPY messaging-service ./messaging-service
 COPY media-service ./media-service
 COPY presence-service ./presence-service
+COPY admin-service ./admin-service
 RUN mvn -q -pl common,media-service -am package -DskipTests
 
 FROM eclipse-temurin:21-jre-jammy

@@ -11,10 +11,10 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Backs the QR "link this browser as a device" flow — WhatsApp Web-style,
- * scoped to a single auth-service instance for now (same in-memory MVP
- * tradeoff as DeviceSwitchService; move to Redis before running more than
- * one replica). A web client starts a pairing, renders the returned token
- * as a QR code, and polls status; the already-signed-in mobile app scans
+ * scoped to a single auth-service instance for now (in-memory MVP tradeoff;
+ * move to Redis before running more than one replica). A web client starts
+ * a pairing, renders the returned token as a QR code, and polls status; the
+ * already-signed-in mobile app scans
  * it and approves, which is what actually mints the new session/JWT
  * (mobile only ever proves ITS OWN identity — the web session it's
  * creating is a side effect of that, never something mobile receives or

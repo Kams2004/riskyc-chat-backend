@@ -1,6 +1,8 @@
 package com.riskyc.messaging.repository;
 
 import com.riskyc.messaging.entity.StatusPost;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -23,4 +25,7 @@ public interface StatusPostRepository extends JpaRepository<StatusPost, String> 
     @Modifying
     @Transactional
     void deleteByStatusIdIn(Collection<String> statusIds);
+
+    /** admin-service's status-moderation list — every currently-active status, newest first. */
+    Page<StatusPost> findByExpiresAtAfterOrderByCreatedAtDesc(Instant now, Pageable pageable);
 }

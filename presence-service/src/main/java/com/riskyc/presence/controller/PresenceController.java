@@ -33,6 +33,15 @@ public class PresenceController {
     public record PresenceResponse(String userId, boolean online, Instant lastSeen) {
     }
 
+    public record OnlineCountResponse(long onlineCount) {
+    }
+
+    /** admin-service's "active/connected users" dashboard tile — same zero-authentication posture as the rest of this controller, see the class doc comment. */
+    @GetMapping("/online-count")
+    public OnlineCountResponse onlineCount() {
+        return new OnlineCountResponse(presenceService.onlineCount());
+    }
+
     @PostMapping("/{userId}/heartbeat")
     public void heartbeat(@PathVariable String userId) {
         presenceService.heartbeat(userId);

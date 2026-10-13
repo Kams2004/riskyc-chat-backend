@@ -9,6 +9,8 @@ import com.riskyc.common.security.JwtIssuer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
@@ -87,6 +89,37 @@ public class SystemAccountInfoController {
     public List<String> internalAllIds(@RequestHeader(value = "X-Internal-Api-Key", required = false) String apiKey) {
         requireInternalKey(apiKey);
         return userRepository.findAll().stream().map(u -> u.getId().toString()).toList();
+    }
+
+    /** Same shape as the public GET above, but internal-key gated instead of JWT — used by messaging-service's admin-broadcast path (which has no system-account JWT to trust) and admin-service's system-account page. */
+    @GetMapping("/internal/system-account/profile")
+    public SystemAccountResult internalProfile(@RequestHeader(value = "X-Internal-Api-Key", required = false) String apiKey) {
+        requireInternalKey(apiKey);
+        if (!systemAccountService.isEnabled()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No official account configured");
+        }
+        User system = systemAccountService.findOrCreateAccount();
+        return new SystemAccountResult(system.getId().toString(), system.getDisplayName(), system.getAvatarObjectKey(),
+                systemAccountService.getDescription(), systemAccountService.getWebsiteUrl());
+    }
+
+    public record SystemAccountProfileUpdate(String displayName, String avatarObjectKey, String description, String websiteUrl) {
+    }
+
+    /** admin-service only — lets an admin edit the official account's profile. Null fields are left unchanged. */
+    @PutMapping("/internal/admin/system-account")
+    public SystemAccountResult updateProfile(@RequestHeader(value = "X-Internal-Api-Key", required = false) String apiKey,
+                                              @RequestBody SystemAccountProfileUpdate request) {
+        requireInternalKey(apiKey);
+        if (!systemAccountService.isEnabled()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No official account configured");
+        }
+        User system = systemAccountService.findOrCreateAccount();
+        if (request.displayName() != null) system.setDisplayName(request.displayName());
+        if (request.avatarObjectKey() != null) system.setAvatarObjectKey(request.avatarObjectKey());
+        userRepository.save(system);
+        systemAccountService.upsertOverride(system.getId(), request.description(), request.websiteUrl());
+        return internalProfile(apiKey);
     }
 
     private void requireInternalKey(String apiKey) {

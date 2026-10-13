@@ -16,6 +16,12 @@ public interface SessionRepository extends JpaRepository<Session, UUID> {
     /** Polled by messaging-service's RevokedJtiCache — only jtis revoked since the last poll need to be (re-)learned. */
     List<Session> findByRevokedTrueAndRevokedAtAfter(Instant since);
 
-    /** Feeds the one-active-mobile-session-per-account check in AuthController#verifyOtp. */
-    List<Session> findByUserIdAndPlatformAndRevokedFalse(UUID userId, String platform);
+    /**
+     * True iff this user currently has at least one non-revoked session —
+     * false is exactly the condition under which the NEXT session created
+     * for them becomes master (AuthController#verifyOtp): either this is
+     * the account's first-ever login, or a previous master cascade-revoked
+     * every session and nobody has logged back in yet.
+     */
+    boolean existsByUserIdAndRevokedFalse(UUID userId);
 }

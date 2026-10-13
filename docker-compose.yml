@@ -88,6 +88,9 @@ services:
       # doc comment); only set these in a local .env for manual testing.
       RISKYC_OTP_IDENTIFIER_COOLDOWN_SECONDS: ${RISKYC_OTP_IDENTIFIER_COOLDOWN_SECONDS:-45}
       RISKYC_OTP_SMS_MAX_TRIALS: ${RISKYC_OTP_SMS_MAX_TRIALS:-2}
+      # Max devices (any mix of phones/tablets/web) one account may have
+      # linked at once — see AuthController#verifyOtp.
+      RISKYC_MAX_LINKED_DEVICES: ${RISKYC_MAX_LINKED_DEVICES:-5}
     depends_on:
       - postgres
 
@@ -132,6 +135,31 @@ services:
       RISKYC_CORS_ALLOWED_ORIGINS: ${RISKYC_CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://167.86.120.214:8085,https://chat.riskycfashion.com}
     depends_on:
       - redis
+
+  admin-service:
+    build:
+      context: .
+      dockerfile: admin-service/Dockerfile
+    ports:
+      - "${ADMIN_SERVICE_HOST_PORT:-8096}:8097"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/riskyc
+      RISKYC_ADMIN_JWT_SECRET: ${RISKYC_ADMIN_JWT_SECRET:-YWRtaW4tZGV2LXNlY3JldC1kby1ub3QtdXNlLWluLXByb2QtcGxlYXNlLWNoYW5nZS1tZQ==}
+      # Blank by default: AdminAccountSeeder generates and logs a strong
+      # random password on first boot (docker logs admin-service) instead.
+      RISKYC_ADMIN_DEFAULT_PASSWORD: ${RISKYC_ADMIN_DEFAULT_PASSWORD:-}
+      RISKYC_INTERNAL_API_KEY: ${RISKYC_INTERNAL_API_KEY:-}
+      RISKYC_AUTH_SERVICE_INTERNAL_URL: ${RISKYC_AUTH_SERVICE_INTERNAL_URL:-http://auth-service:8081}
+      RISKYC_MESSAGING_SERVICE_INTERNAL_URL: ${RISKYC_MESSAGING_SERVICE_INTERNAL_URL:-http://messaging-service:8082}
+      RISKYC_PRESENCE_SERVICE_INTERNAL_URL: ${RISKYC_PRESENCE_SERVICE_INTERNAL_URL:-http://presence-service:8084}
+      # Deliberately its own var, never RISKYC_CORS_ALLOWED_ORIGINS — see
+      # application.yml's own comment on why that separation matters.
+      RISKYC_ADMIN_CORS_ALLOWED_ORIGINS: ${RISKYC_ADMIN_CORS_ALLOWED_ORIGINS:-http://localhost:5174,http://167.86.120.214:8086}
+    depends_on:
+      - postgres
+      - auth-service
+      - messaging-service
+      - presence-service
 
   # TURN relay for calling: public STUN alone often can't establish a P2P
   # media path once caller and callee are on genuinely different networks

@@ -6,7 +6,12 @@ package com.riskyc.messaging.dto;
  * the callee's /user/queue/calls. callerName is client-supplied (messaging-
  * service has no User table to look it up itself) — used only for the push
  * notification's title and the notification-answer flow's display; never
- * trusted for anything security-relevant.
+ * trusted for anything security-relevant. fromDeviceId is likewise
+ * client-generated and purely a relay value, not auth-relevant — an
+ * ephemeral per-app-session id the caller's own other devices use to
+ * recognize "this invite/answer/end came from me" if the same account is
+ * signed in on multiple devices (see CallController#answer).
  */
-public record CallInvite(String callId, String fromUserId, String toUserId, String type, String sdpOffer, String callerName) {
+public record CallInvite(String callId, String fromUserId, String toUserId, String type, String sdpOffer, String callerName,
+                          String fromDeviceId) {
 }

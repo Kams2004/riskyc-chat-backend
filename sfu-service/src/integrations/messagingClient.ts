@@ -44,6 +44,32 @@ export async function notifyGroupCallInvite(payload: GroupCallInvitePayload): Pr
   }
 }
 
+export type GroupCallMemberJoinedPayload = {
+  groupId: string;
+  memberId: string;
+};
+
+/**
+ * Fires the instant a member's peer is actually accepted into the SFU room
+ * (not when the invite goes out) — lets messaging-service tell that
+ * member's OTHER devices, still ringing with the incoming-call banner, to
+ * stand down now that this account has a device in the call.
+ */
+export async function notifyGroupCallMemberJoined(payload: GroupCallMemberJoinedPayload): Promise<void> {
+  try {
+    const response = await fetch(`${config.messagingServiceInternalUrl}/internal/group-calls/member-joined`, {
+      method: 'POST',
+      headers: internalHeaders(),
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      console.warn(`[messagingClient] member-joined notify failed: ${response.status}`);
+    }
+  } catch (e) {
+    console.warn('[messagingClient] member-joined notify failed', e);
+  }
+}
+
 export type GroupCallEndedPayload = {
   groupId: string;
   callType: 'AUDIO' | 'VIDEO';

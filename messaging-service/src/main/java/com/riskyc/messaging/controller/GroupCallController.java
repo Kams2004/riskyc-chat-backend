@@ -4,6 +4,7 @@ import com.riskyc.common.dto.MessageEnvelope;
 import com.riskyc.messaging.dto.GroupCallEndedRequest;
 import com.riskyc.messaging.dto.GroupCallInvite;
 import com.riskyc.messaging.dto.GroupCallInviteRequest;
+import com.riskyc.messaging.dto.GroupCallMemberJoined;
 import com.riskyc.messaging.entity.GroupMember;
 import com.riskyc.messaging.entity.Message;
 import com.riskyc.messaging.repository.GroupMemberRepository;
@@ -93,6 +94,27 @@ public class GroupCallController {
             pushNotificationService.sendToUser(memberId, callerLabel, "Incoming group " + callKind, "calls-v3", pushData,
                     "incoming_group_call");
         }
+    }
+
+    public record GroupCallMemberJoinedRequest(String groupId, String memberId) {
+    }
+
+    /**
+     * Fires the instant sfu-service accepts a member's join into the SFU
+     * room (see protooServer.ts) — not when the invite goes out. Broadcasts
+     * to the member's OWN user destination so every OTHER device that
+     * account is signed into (still showing the incoming-group-call banner,
+     * never having joined the SFU itself) can dismiss it, mirroring 1:1's
+     * answered-elsewhere signal in CallController#answer. A harmless no-op
+     * for any sibling device that already dismissed.
+     */
+    @PostMapping("/internal/group-calls/member-joined")
+    public void memberJoined(@RequestHeader(value = "X-Internal-Api-Key", required = false) String apiKey,
+                              @RequestBody GroupCallMemberJoinedRequest request) {
+        requireInternalKey(apiKey);
+        messagingTemplate.convertAndSendToUser(request.memberId(), "/queue/calls",
+                new GroupCallMemberJoined(request.groupId(), request.memberId()),
+                Map.of("callMessageType", "group-member-joined"));
     }
 
     /** Fires once a room's last peer leaves — logs a call-summary message into the group conversation, same shape CallController#logCallAsMessage uses for 1:1, generalized for N participants. */

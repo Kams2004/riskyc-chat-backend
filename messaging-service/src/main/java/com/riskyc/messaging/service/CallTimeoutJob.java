@@ -55,7 +55,7 @@ public class CallTimeoutJob {
             // the callee, but a caller who backgrounded rather than hung up
             // could still have it on screen too) needs to be told directly —
             // it never sent or received a real call.end for this callId.
-            CallEnd outbound = new CallEnd(call.getId(), "system", "timeout");
+            CallEnd outbound = new CallEnd(call.getId(), "system", "timeout", null);
             Map<String, Object> headers = Map.of("callMessageType", "end");
             messagingTemplate.convertAndSendToUser(call.getCallerId(), "/queue/calls", outbound, headers);
             messagingTemplate.convertAndSendToUser(call.getCalleeId(), "/queue/calls", outbound, headers);

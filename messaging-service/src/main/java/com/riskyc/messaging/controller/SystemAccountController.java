@@ -73,9 +73,7 @@ public class SystemAccountController {
     @PostMapping("/internal/system-account/welcome")
     public void welcome(@RequestHeader(value = "X-Internal-Api-Key", required = false) String apiKey,
                          @RequestBody SystemWelcomeRequest request) {
-        if (!internalApiKey.isBlank() && !internalApiKey.equals(apiKey)) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid internal API key");
-        }
+        requireInternalKey(apiKey);
 
         String messageId = UUID.randomUUID().toString();
         Instant sentAt = Instant.now();
@@ -133,44 +131,119 @@ public class SystemAccountController {
         }
 
         List<String> allUserIds = fetchAllUserIds();
-        String title = request.senderDisplayName() != null ? request.senderDisplayName() : "RiskyC Chat";
-        String previewBody = request.text() != null && !request.text().isBlank() ? request.text()
-                : request.mediaType() != null ? "📎 " + request.mediaType() : "";
-
         for (String recipientId : allUserIds) {
             if (recipientId.equals(callerId)) {
                 continue;
             }
-            String conversationId = List.of(callerId, recipientId).stream().sorted().reduce((a, b) -> a + "_" + b).orElseThrow();
-            String messageId = UUID.randomUUID().toString();
-            Instant sentAt = Instant.now();
+            sendBroadcastMessage(callerId, request.senderDisplayName(), request.senderAvatarObjectKey(), recipientId, request);
+        }
+    }
 
-            Message message = new Message(messageId, conversationId, callerId, recipientId,
-                    request.text() != null ? request.text() : "", sentAt);
-            if (request.mediaType() != null) {
-                message.setMediaType(Message.MediaType.valueOf(request.mediaType()));
-                message.setMediaObjectKey(request.mediaObjectKey());
-                message.setMediaFileName(request.mediaFileName());
-                message.setMediaDurationMs(request.mediaDurationMs());
+    /**
+     * The per-recipient persist+fan-out that both the client-facing
+     * broadcast() above and admin-service's internalBroadcast() below share
+     * — one Message row, STOMP delivery to the conversation topic + the
+     * recipient's own queue, and a push notification, same shape as a
+     * normal ChatController#send.
+     */
+    private void sendBroadcastMessage(String senderId, String senderDisplayName, String senderAvatarObjectKey,
+                                       String recipientId, BroadcastRequest request) {
+        String conversationId = List.of(senderId, recipientId).stream().sorted().reduce((a, b) -> a + "_" + b).orElseThrow();
+        String messageId = UUID.randomUUID().toString();
+        Instant sentAt = Instant.now();
+
+        Message message = new Message(messageId, conversationId, senderId, recipientId,
+                request.text() != null ? request.text() : "", sentAt);
+        if (request.mediaType() != null) {
+            message.setMediaType(Message.MediaType.valueOf(request.mediaType()));
+            message.setMediaObjectKey(request.mediaObjectKey());
+            message.setMediaFileName(request.mediaFileName());
+            message.setMediaDurationMs(request.mediaDurationMs());
+        }
+        messageRepository.save(message);
+
+        MessageEnvelope outbound = new MessageEnvelope(messageId, conversationId, senderId, recipientId,
+                message.getCiphertext(), sentAt, message.getStatus().name(), request.mediaType(),
+                request.mediaObjectKey(), request.mediaFileName(), request.mediaDurationMs(), null, null, false, false,
+                null, false, List.of(), null, null, null, null, false, null, senderDisplayName, null,
+                false, null, null, null, null, null, null, null, null);
+        messagingTemplate.convertAndSend("/topic/conversation." + conversationId, outbound);
+        messagingTemplate.convertAndSendToUser(recipientId, "/queue/messages", outbound);
+
+        String title = senderDisplayName != null ? senderDisplayName : "RiskyC Chat";
+        String previewBody = request.text() != null && !request.text().isBlank() ? request.text()
+                : request.mediaType() != null ? "📎 " + request.mediaType() : "";
+        Map<String, Object> pushData = new LinkedHashMap<>();
+        pushData.put("type", "message");
+        pushData.put("conversationId", conversationId);
+        pushData.put("senderId", senderId);
+        if (senderAvatarObjectKey != null) {
+            pushData.put("avatarObjectKey", senderAvatarObjectKey);
+        }
+        pushNotificationService.sendToUser(recipientId, title, previewBody, "messages-v3", pushData);
+    }
+
+    public record InternalBroadcastRequest(String text, String recipientId) {
+    }
+
+    public record InternalBroadcastResult(int recipientCount) {
+    }
+
+    /**
+     * admin-service's broadcast path — internal-key gated, no system-account
+     * JWT required (admin-service never signs in as the system account; it
+     * just triggers this on its behalf). Resolves the real profile itself
+     * (via auth-service's internal endpoint) rather than trusting a request
+     * body the way the JWT-authenticated public endpoint above can, since
+     * there's no caller identity here to have already proven it. recipientId
+     * present → just that one user; absent → every user, same as broadcast().
+     * Text-only for now — media broadcast from the admin dashboard is a
+     * separate, not-yet-built follow-up.
+     */
+    @PostMapping("/internal/admin/broadcast")
+    public InternalBroadcastResult internalBroadcast(@RequestHeader(value = "X-Internal-Api-Key", required = false) String apiKey,
+                                                       @RequestBody InternalBroadcastRequest request) {
+        requireInternalKey(apiKey);
+        Map<String, Object> profile = fetchSystemAccountProfile();
+        if (profile == null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "No official account configured");
+        }
+        String senderId = String.valueOf(profile.get("userId"));
+        String senderDisplayName = (String) profile.get("displayName");
+        String senderAvatarObjectKey = (String) profile.get("avatarObjectKey");
+
+        BroadcastRequest broadcastBody = new BroadcastRequest(request.text(), null, null, null, null,
+                senderDisplayName, senderAvatarObjectKey);
+
+        List<String> recipients = (request.recipientId() != null && !request.recipientId().isBlank())
+                ? List.of(request.recipientId())
+                : fetchAllUserIds().stream().filter(id -> !id.equals(senderId)).toList();
+
+        for (String recipientId : recipients) {
+            sendBroadcastMessage(senderId, senderDisplayName, senderAvatarObjectKey, recipientId, broadcastBody);
+        }
+        return new InternalBroadcastResult(recipients.size());
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> fetchSystemAccountProfile() {
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            if (!internalApiKey.isBlank()) {
+                headers.set("X-Internal-Api-Key", internalApiKey);
             }
-            messageRepository.save(message);
+            URI uri = URI.create(authServiceInternalUrl + "/internal/system-account/profile");
+            var response = restTemplate.exchange(uri, HttpMethod.GET, new HttpEntity<Void>(headers), Map.class);
+            return response.getBody();
+        } catch (RestClientException e) {
+            log.log(Level.WARNING, "Failed to resolve the official account's profile from auth-service", e);
+            return null;
+        }
+    }
 
-            MessageEnvelope outbound = new MessageEnvelope(messageId, conversationId, callerId, recipientId,
-                    message.getCiphertext(), sentAt, message.getStatus().name(), request.mediaType(),
-                    request.mediaObjectKey(), request.mediaFileName(), request.mediaDurationMs(), null, null, false, false,
-                    null, false, List.of(), null, null, null, null, false, null, request.senderDisplayName(), null,
-                    false, null, null, null, null, null, null, null, null);
-            messagingTemplate.convertAndSend("/topic/conversation." + conversationId, outbound);
-            messagingTemplate.convertAndSendToUser(recipientId, "/queue/messages", outbound);
-
-            Map<String, Object> pushData = new LinkedHashMap<>();
-            pushData.put("type", "message");
-            pushData.put("conversationId", conversationId);
-            pushData.put("senderId", callerId);
-            if (request.senderAvatarObjectKey() != null) {
-                pushData.put("avatarObjectKey", request.senderAvatarObjectKey());
-            }
-            pushNotificationService.sendToUser(recipientId, title, previewBody, "messages-v3", pushData);
+    private void requireInternalKey(String apiKey) {
+        if (!internalApiKey.isBlank() && !internalApiKey.equals(apiKey)) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid internal API key");
         }
     }
 

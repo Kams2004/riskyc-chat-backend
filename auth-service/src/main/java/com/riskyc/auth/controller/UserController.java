@@ -4,17 +4,16 @@ import com.riskyc.auth.entity.Session;
 import com.riskyc.auth.entity.User;
 import com.riskyc.auth.repository.SessionRepository;
 import com.riskyc.auth.repository.UserRepository;
+import com.riskyc.auth.service.AccountDeletionService;
 import com.riskyc.auth.service.EmailOtpSender;
 import com.riskyc.auth.service.IdentifierValidator;
 import com.riskyc.auth.service.OtpRateLimiter;
 import com.riskyc.auth.service.OtpService;
+import com.riskyc.auth.service.SessionService;
 import com.riskyc.auth.service.SmsOtpSender;
 import com.riskyc.common.security.JwtIssuer;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -26,11 +25,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -56,29 +52,27 @@ public class UserController {
 
     private final UserRepository userRepository;
     private final SessionRepository sessionRepository;
+    private final SessionService sessionService;
+    private final AccountDeletionService accountDeletionService;
     private final JwtIssuer jwtIssuer;
     private final OtpService otpService;
     private final OtpRateLimiter rateLimiter;
     private final EmailOtpSender emailOtpSender;
     private final SmsOtpSender smsOtpSender;
-    private final String internalApiKey;
-    private final String messagingServiceInternalUrl;
-    private final RestTemplate restTemplate = new RestTemplate();
 
-    public UserController(UserRepository userRepository, SessionRepository sessionRepository, JwtIssuer jwtIssuer,
-                           OtpService otpService, OtpRateLimiter rateLimiter, EmailOtpSender emailOtpSender,
-                           SmsOtpSender smsOtpSender,
-                           @Value("${riskyc.internal.api-key:}") String internalApiKey,
-                           @Value("${riskyc.messaging-service.internal-url}") String messagingServiceInternalUrl) {
+    public UserController(UserRepository userRepository, SessionRepository sessionRepository, SessionService sessionService,
+                           AccountDeletionService accountDeletionService,
+                           JwtIssuer jwtIssuer, OtpService otpService, OtpRateLimiter rateLimiter, EmailOtpSender emailOtpSender,
+                           SmsOtpSender smsOtpSender) {
         this.userRepository = userRepository;
         this.sessionRepository = sessionRepository;
+        this.sessionService = sessionService;
+        this.accountDeletionService = accountDeletionService;
         this.jwtIssuer = jwtIssuer;
         this.otpService = otpService;
         this.rateLimiter = rateLimiter;
         this.emailOtpSender = emailOtpSender;
         this.smsOtpSender = smsOtpSender;
-        this.internalApiKey = internalApiKey;
-        this.messagingServiceInternalUrl = messagingServiceInternalUrl;
     }
 
     public record UserResult(String userId, String displayName, String email, String phoneNumber, String avatarObjectKey) {
@@ -372,11 +366,11 @@ public class UserController {
         String token = jwtIssuer.issue(target.getId().toString(), Duration.ofDays(30), jti);
         // profile-setup.tsx (where this flow lives) is mobile-only, so this
         // is always a mobile session — tagged accordingly for Session-table
-        // consistency, though this specific onboarding path is deliberately
-        // NOT gated by AuthController#verifyOtp's one-mobile-session rule
-        // (out of scope for a one-time merge, see that method's own doc
-        // comment for where the rule actually applies).
-        sessionRepository.save(new Session(jti, target.getId(), "Linked via email verification", Instant.now(), "mobile"));
+        // consistency. Not gated by the device cap (out of scope for a
+        // one-time merge); isMaster follows the same "no other active
+        // sessions" rule as a normal login (AuthController#verifyOtp).
+        boolean isMaster = !sessionRepository.existsByUserIdAndRevokedFalse(target.getId());
+        sessionRepository.save(new Session(jti, target.getId(), "Linked via email verification", Instant.now(), "mobile", isMaster));
 
         return ResponseEntity.ok(new MergeResult(true, token, toResult(target)));
     }
@@ -398,25 +392,20 @@ public class UserController {
      * notifications for messages sent to an id nothing can sign into
      * anymore. Best-effort: a messaging-service hiccup here shouldn't block
      * the account deletion itself.
+     *
+     * Master-only: deleting the account is exactly as destructive as
+     * removing every linked device at once, so it's gated the same way
+     * (see SessionController#revoke). Session rows for this user are
+     * revoked afterward too — the old code left them orphaned, pointing at
+     * a userId that no longer exists.
      */
     @DeleteMapping("/api/users/me")
     public void deleteMe(@RequestHeader(value = "Authorization", required = false) String authorization) {
-        UUID callerId = callerIdFrom(authorization);
-        userRepository.deleteById(callerId);
-        unregisterAllPushTokens(callerId);
-    }
-
-    private void unregisterAllPushTokens(UUID userId) {
-        try {
-            HttpHeaders headers = new HttpHeaders();
-            if (!internalApiKey.isBlank()) {
-                headers.set("X-Internal-Api-Key", internalApiKey);
-            }
-            URI uri = URI.create(messagingServiceInternalUrl + "/internal/push-tokens/" + userId);
-            restTemplate.exchange(uri, HttpMethod.DELETE, new HttpEntity<Void>(headers), Void.class);
-        } catch (RestClientException e) {
-            log.log(Level.WARNING, "Failed to unregister push tokens for deleted account " + userId, e);
+        Session callerSession = callerSessionFrom(authorization);
+        if (!callerSession.isMaster()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only the master device can delete the account");
         }
+        accountDeletionService.deleteAccount(callerSession.getUserId());
     }
 
     /** Same caveat as AuthController's: correct only as long as nothing sits in front of this service yet. */
@@ -439,6 +428,27 @@ public class UserController {
                 throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Session has been signed out");
             }
             return UUID.fromString(claims.subject());
+        } catch (ResponseStatusException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid token");
+        }
+    }
+
+    /** Same validation as callerIdFrom, but returns the caller's own Session row (not just the userId) — needed wherever a master/non-master distinction matters, like deleteMe above. */
+    private Session callerSessionFrom(String authorization) {
+        if (authorization == null || !authorization.startsWith("Bearer ")) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Missing bearer token");
+        }
+        String token = authorization.substring("Bearer ".length());
+        try {
+            JwtIssuer.JwtClaims claims = jwtIssuer.verifyAndGetClaims(token);
+            Session session = sessionRepository.findByJti(claims.jti())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Session has been signed out"));
+            if (session.isRevoked()) {
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Session has been signed out");
+            }
+            return session;
         } catch (ResponseStatusException e) {
             throw e;
         } catch (RuntimeException e) {

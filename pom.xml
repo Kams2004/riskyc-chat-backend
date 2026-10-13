@@ -18,6 +18,7 @@
         <module>messaging-service</module>
         <module>media-service</module>
         <module>presence-service</module>
+        <module>admin-service</module>
     </modules>
 
     <properties>

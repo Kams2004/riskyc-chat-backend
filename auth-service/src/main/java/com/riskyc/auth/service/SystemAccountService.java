@@ -1,6 +1,8 @@
 package com.riskyc.auth.service;
 
+import com.riskyc.auth.entity.SystemAccountOverride;
 import com.riskyc.auth.entity.User;
+import com.riskyc.auth.repository.SystemAccountOverrideRepository;
 import com.riskyc.auth.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
@@ -11,9 +13,12 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
 import java.net.URI;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -36,17 +41,18 @@ public class SystemAccountService {
     private static final Logger log = Logger.getLogger(SystemAccountService.class.getName());
 
     private final UserRepository userRepository;
+    private final SystemAccountOverrideRepository overrideRepository;
     private final RestTemplate restTemplate = new RestTemplate();
 
     private final String accessEmail;
     private final String displayName;
     private final String welcomeMessage;
-    private final String description;
-    private final String websiteUrl;
+    private final String defaultDescription;
+    private final String defaultWebsiteUrl;
     private final String messagingServiceInternalUrl;
     private final String internalApiKey;
 
-    public SystemAccountService(UserRepository userRepository,
+    public SystemAccountService(UserRepository userRepository, SystemAccountOverrideRepository overrideRepository,
                                  @Value("${riskyc.system-account.access-email:}") String accessEmail,
                                  @Value("${riskyc.system-account.display-name:RiskyC Fashion}") String displayName,
                                  @Value("${riskyc.system-account.welcome-message:}") String welcomeMessage,
@@ -55,11 +61,12 @@ public class SystemAccountService {
                                  @Value("${riskyc.messaging-service.internal-url}") String messagingServiceInternalUrl,
                                  @Value("${riskyc.internal.api-key:}") String internalApiKey) {
         this.userRepository = userRepository;
+        this.overrideRepository = overrideRepository;
         this.accessEmail = accessEmail;
         this.displayName = displayName;
         this.welcomeMessage = welcomeMessage;
-        this.description = description;
-        this.websiteUrl = websiteUrl;
+        this.defaultDescription = description;
+        this.defaultWebsiteUrl = websiteUrl;
         this.messagingServiceInternalUrl = messagingServiceInternalUrl;
         this.internalApiKey = internalApiKey;
     }
@@ -68,12 +75,23 @@ public class SystemAccountService {
         return !accessEmail.isBlank();
     }
 
+    /** Prefers an admin-set override (see SystemAccountOverride) over the config-only default, falling back to the default when no override row exists or its field is null. */
     public String getDescription() {
-        return description;
+        return findOverride().map(SystemAccountOverride::getDescription).orElse(defaultDescription);
     }
 
     public String getWebsiteUrl() {
-        return websiteUrl;
+        return findOverride().map(SystemAccountOverride::getWebsiteUrl).orElse(defaultWebsiteUrl);
+    }
+
+    private Optional<SystemAccountOverride> findOverride() {
+        if (!isEnabled()) return Optional.empty();
+        return overrideRepository.findById(findOrCreateAccount().getId());
+    }
+
+    /** admin-service only (see SystemAccountInfoController's internal PUT endpoint) — upserts the one override row for this account. */
+    public void upsertOverride(UUID userId, String description, String websiteUrl) {
+        overrideRepository.save(new SystemAccountOverride(userId, description, websiteUrl, Instant.now()));
     }
 
     public boolean matchesAccessIdentifier(String email) {

@@ -41,6 +41,12 @@ riskyc:
     # disables the check for local dev, same blank-default pattern already
     # used for the SMS/mail credentials below.
     api-key: ${RISKYC_INTERNAL_API_KEY:}
+  devices:
+    # Max linked devices (phones, tablets, and web sessions all share this
+    # one pool) per account — see AuthController#verifyOtp and
+    # PairingController#approve. The master device must remove one
+    # (SessionController#revoke) before another can link past this cap.
+    max-linked: ${RISKYC_MAX_LINKED_DEVICES:5}
   system-account:
     # A special identifier that, when submitted as the "email" to
     # POST /api/auth/otp/request, logs straight into the RiskyC Fashion

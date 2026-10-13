@@ -47,6 +47,18 @@ public class User {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
+    // Admin-moderation state (see admin-service) — a suspended account can't
+    // complete a new OTP login (AuthController#verifyOtp) and has every
+    // linked device signed out the moment it's suspended (SessionService#revokeAll).
+    @Column(name = "suspended", nullable = false)
+    private boolean suspended = false;
+
+    @Column(name = "suspended_reason", columnDefinition = "text")
+    private String suspendedReason;
+
+    @Column(name = "suspended_at")
+    private Instant suspendedAt;
+
     protected User() {
         // JPA
     }
@@ -107,5 +119,29 @@ public class User {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public boolean isSuspended() {
+        return suspended;
+    }
+
+    public String getSuspendedReason() {
+        return suspendedReason;
+    }
+
+    public Instant getSuspendedAt() {
+        return suspendedAt;
+    }
+
+    public void suspend(String reason, Instant now) {
+        this.suspended = true;
+        this.suspendedReason = reason;
+        this.suspendedAt = now;
+    }
+
+    public void unsuspend() {
+        this.suspended = false;
+        this.suspendedReason = null;
+        this.suspendedAt = null;
     }
 }

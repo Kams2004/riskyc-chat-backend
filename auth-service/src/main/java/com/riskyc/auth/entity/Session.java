@@ -13,10 +13,11 @@ import java.util.UUID;
 
 /**
  * One row per issued JWT — the source of truth for the "logged-in devices"
- * screen and for remote sign-out. jti is the token's own JWT ID claim (see
- * JwtIssuer); revoking a session here doesn't invalidate the JWT's signature
- * (it's still cryptographically valid until natural expiry) — it only stops
- * being *trusted* by whichever service checks RevokedJtiCache/this table.
+ * screen, remote sign-out, and which linked device is the account's master
+ * (see isMaster). jti is the token's own JWT ID claim (see JwtIssuer);
+ * revoking a session here doesn't invalidate the JWT's signature (it's still
+ * cryptographically valid until natural expiry) — it only stops being
+ * *trusted* by whichever service checks RevokedJtiCache/this table.
  * See auth-service's own README-documented scope: enforced here and in
  * messaging-service; media-service/presence-service stay signature-only
  * trust (both are Postgres-free, so checking this table isn't cheap there).
@@ -62,17 +63,29 @@ public class Session {
     @Column(name = "revoked_at")
     private Instant revokedAt;
 
+    // True for exactly the session that was active when this user had zero
+    // other non-revoked sessions at login time (see AuthController#verifyOtp)
+    // — the account's first-ever login, or the first login after every prior
+    // session was cascade-revoked by a previous master signing out. Only the
+    // master session may remove other devices or delete the account
+    // (SessionController#revoke, UserController#deleteMe); the master
+    // signing itself out cascades to revoke every sibling session too, so
+    // the account is never left masterless for long.
+    @Column(name = "is_master", nullable = false)
+    private boolean isMaster;
+
     protected Session() {
         // JPA
     }
 
-    public Session(String jti, UUID userId, String deviceLabel, Instant createdAt, String platform) {
+    public Session(String jti, UUID userId, String deviceLabel, Instant createdAt, String platform, boolean isMaster) {
         this.jti = jti;
         this.userId = userId;
         this.deviceLabel = deviceLabel;
         this.createdAt = createdAt;
         this.lastSeenAt = createdAt;
         this.platform = platform;
+        this.isMaster = isMaster;
     }
 
     public UUID getId() {
@@ -105,6 +118,10 @@ public class Session {
 
     public boolean isRevoked() {
         return revoked;
+    }
+
+    public boolean isMaster() {
+        return isMaster;
     }
 
     public void revoke(Instant now) {

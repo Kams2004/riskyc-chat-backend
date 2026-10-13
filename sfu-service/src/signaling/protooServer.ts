@@ -6,7 +6,7 @@ import { InvalidTokenError, verifyToken } from '../auth/jwt.js';
 import { isRevoked } from '../auth/revokedJtiPoller.js';
 import { GroupCallPeer } from '../mediasoup/peer.js';
 import { closeRoomIfEmpty, getOrCreateRoom } from '../mediasoup/roomManager.js';
-import { notifyGroupCallEnded } from '../integrations/messagingClient.js';
+import { notifyGroupCallEnded, notifyGroupCallMemberJoined } from '../integrations/messagingClient.js';
 import { handleRequest } from './requestHandlers.js';
 
 /**
@@ -86,8 +86,15 @@ async function handleConnectionRequest(
   // protoo.Room.createPeer() throws on a duplicate id, and there's no
   // "resume" semantics here (see plan notes: a dropped WS means a full
   // rejoin with fresh transports, never a resume of old server-side state).
+  // peerId === userId (no separate per-device id at this layer), so this
+  // path fires identically for a genuine same-device reconnect and a real
+  // second device of the same account joining — both cases tear down
+  // `previous` either way, so telling it why before closing is harmless
+  // either way too: a dead reconnect-source socket just fails to receive
+  // the notify silently (best-effort, same tolerance as room.notifyOthers).
   const previous = room.protooRoom.getPeer(userId);
   if (previous) {
+    void previous.notify('joinedElsewhere', {}).catch(() => {});
     previous.close();
     room.removePeer(userId);
   }
@@ -97,6 +104,12 @@ async function handleConnectionRequest(
   room.addPeer(peer);
 
   room.notifyOthers('peerJoined', { peerId: peer.id, displayName }, peer.id);
+  // Tells this member's OTHER (still-ringing, never-joined) devices to stop
+  // ringing — distinct from peerJoined above, which only reaches people
+  // already IN the room. Fire-and-forget, mirrors notifyGroupCallEnded's
+  // best-effort shape; a harmless no-op for any sibling device that already
+  // dismissed its banner.
+  void notifyGroupCallMemberJoined({ groupId, memberId: userId });
 
   protooPeer.on('request', (request, acceptReq, rejectReq) => {
     void handleRequest(room, peer, request, acceptReq, rejectReq);

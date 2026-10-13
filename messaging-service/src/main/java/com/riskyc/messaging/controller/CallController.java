@@ -76,7 +76,7 @@ public class CallController {
         callRepository.save(call);
 
         CallInvite outbound = new CallInvite(callId, fromUserId, inbound.toUserId(), inbound.type(), inbound.sdpOffer(),
-                inbound.callerName());
+                inbound.callerName(), inbound.fromDeviceId());
         messagingTemplate.convertAndSendToUser(inbound.toUserId(), "/queue/calls", outbound, headersFor("invite"));
 
         // fromUserId/callerName/callType let a notification action (Answer/
@@ -146,12 +146,29 @@ public class CallController {
             if (!principal.getName().equals(call.getCalleeId())) {
                 return;
             }
+            // If the callee is signed into multiple devices, more than one
+            // could race to answer — only the first one to land here wins;
+            // a second answer attempt for an already-ACCEPTED call is a
+            // no-op (that sibling device learns the outcome from the
+            // "answered-elsewhere" broadcast below instead).
+            if (call.getStatus() != Call.CallStatus.RINGING) {
+                return;
+            }
             call.setStatus(Call.CallStatus.ACCEPTED);
             call.setAnsweredAt(Instant.now());
             callRepository.save(call);
 
-            CallAnswer outbound = new CallAnswer(inbound.callId(), principal.getName(), inbound.sdpAnswer());
+            CallAnswer outbound = new CallAnswer(inbound.callId(), principal.getName(), inbound.sdpAnswer(), inbound.fromDeviceId());
             messagingTemplate.convertAndSendToUser(call.getCallerId(), "/queue/calls", outbound, headersFor("answer"));
+
+            // Tell the callee's OWN other sessions (if any) to stop ringing
+            // — reaches every connected device of this account via the same
+            // convertAndSendToUser fan-out, including the device that just
+            // answered itself; that device recognizes its own fromDeviceId
+            // in the echo and ignores it, while siblings treat it as the
+            // real "stop ringing, answered elsewhere" signal.
+            CallEnd answeredElsewhere = new CallEnd(inbound.callId(), principal.getName(), "answered-elsewhere", inbound.fromDeviceId());
+            messagingTemplate.convertAndSendToUser(call.getCalleeId(), "/queue/calls", answeredElsewhere, headersFor("end"));
         });
     }
 
@@ -201,7 +218,7 @@ public class CallController {
         callRepository.findById(inbound.callId()).ifPresent(call -> {
             String fromUserId = principal.getName();
             String toUserId = call.otherParty(fromUserId);
-            CallAnswer outbound = new CallAnswer(inbound.callId(), fromUserId, inbound.sdpAnswer());
+            CallAnswer outbound = new CallAnswer(inbound.callId(), fromUserId, inbound.sdpAnswer(), inbound.fromDeviceId());
             messagingTemplate.convertAndSendToUser(toUserId, "/queue/calls", outbound, headersFor("renegotiate-answer"));
         });
     }
@@ -253,7 +270,7 @@ public class CallController {
             callRepository.save(call);
 
             String toUserId = call.otherParty(fromUserId);
-            CallEnd outbound = new CallEnd(inbound.callId(), fromUserId, inbound.reason());
+            CallEnd outbound = new CallEnd(inbound.callId(), fromUserId, inbound.reason(), inbound.fromDeviceId());
             messagingTemplate.convertAndSendToUser(toUserId, "/queue/calls", outbound, headersFor("end"));
 
             callLogService.logCallAsMessage(call);
