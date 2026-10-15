@@ -47,6 +47,14 @@ riskyc:
     # PairingController#approve. The master device must remove one
     # (SessionController#revoke) before another can link past this cap.
     max-linked: ${RISKYC_MAX_LINKED_DEVICES:5}
+  pairing:
+    # How long a QR/manual-code device-pairing stays valid before the client
+    # must request a fresh one (PairingService/PairingController) — admin-
+    # configurable, same pattern as max-linked above. The response from
+    # POST /api/auth/pairing/start carries this value back as
+    # expiresInSeconds so mobile/web schedule their own refresh timer from
+    # it rather than hardcoding a guess that could drift out of sync.
+    pending-ttl-seconds: ${RISKYC_PAIRING_CODE_TTL_SECONDS:120}
   system-account:
     # A special identifier that, when submitted as the "email" to
     # POST /api/auth/otp/request, logs straight into the RiskyC Fashion

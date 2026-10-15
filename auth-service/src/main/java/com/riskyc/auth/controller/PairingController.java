@@ -59,7 +59,8 @@ public class PairingController {
     public record StartRequest(String deviceLabel, String platform) {
     }
 
-    public record StartResponse(String token, String code) {
+    /** expiresInSeconds is the admin-configurable pairing lifetime (riskyc.pairing.pending-ttl-seconds) — callers schedule their own "refresh for a new code" timer from this value instead of guessing/hardcoding one, so client and server never drift out of sync. */
+    public record StartResponse(String token, String code, long expiresInSeconds) {
     }
 
     /** No auth required — this is what an anonymous, not-yet-signed-in client calls to get a QR code (and its short manual-entry fallback) in the first place. deviceLabel/platform are client-supplied/display-only, same trust level as OtpVerifyRequest's own (see AuthController's doc comment on that field). */
@@ -68,7 +69,7 @@ public class PairingController {
         String label = request.deviceLabel() != null && !request.deviceLabel().isBlank() ? request.deviceLabel() : "Web browser";
         String platform = request.platform() != null && !request.platform().isBlank() ? request.platform() : "web";
         PairingService.Started started = pairingService.start(label, platform);
-        return new StartResponse(started.token(), started.code());
+        return new StartResponse(started.token(), started.code(), started.expiresInSeconds());
     }
 
     public record StatusResponse(String status, PairingService.ApprovedResult session) {

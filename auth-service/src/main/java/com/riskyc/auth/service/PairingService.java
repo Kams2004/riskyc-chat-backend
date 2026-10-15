@@ -1,5 +1,6 @@
 package com.riskyc.auth.service;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.security.SecureRandom;
@@ -25,15 +26,14 @@ import java.util.concurrent.ConcurrentHashMap;
 @Service
 public class PairingService {
 
-    private static final Duration PENDING_TTL = Duration.ofMinutes(3);
     // Short — this only needs to survive until the waiting client's next poll
     // picks up the result, not stay valid indefinitely once issued.
     private static final Duration APPROVED_TTL = Duration.ofSeconds(30);
 
     // Excludes 0/O/1/I — ambiguous when hand-typed from one device's screen
     // onto another's keyboard. 32 symbols ^ 8 chars ≈ 1.1e12 combinations,
-    // which next to the 3-minute PENDING_TTL is safe against guessing without
-    // needing a dedicated rate limiter on the lookup endpoint.
+    // which next to pendingTtl (minutes, not hours) is safe against guessing
+    // without needing a dedicated rate limiter on the lookup endpoint.
     private static final String CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private static final int CODE_LENGTH = 8;
 
@@ -57,8 +57,13 @@ public class PairingService {
     private final Map<String, Entry> entries = new ConcurrentHashMap<>();
     private final Map<String, String> codeToToken = new ConcurrentHashMap<>();
     private final SecureRandom random = new SecureRandom();
+    private final Duration pendingTtl;
 
-    public record Started(String token, String code) {
+    public PairingService(@Value("${riskyc.pairing.pending-ttl-seconds:120}") long pendingTtlSeconds) {
+        this.pendingTtl = Duration.ofSeconds(pendingTtlSeconds);
+    }
+
+    public record Started(String token, String code, long expiresInSeconds) {
     }
 
     public Started start(String deviceLabel, String platform) {
@@ -66,9 +71,9 @@ public class PairingService {
         random.nextBytes(bytes);
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
         String code = generateCode();
-        entries.put(token, new Entry(deviceLabel, platform, code, Status.PENDING, null, Instant.now().plus(PENDING_TTL)));
+        entries.put(token, new Entry(deviceLabel, platform, code, Status.PENDING, null, Instant.now().plus(pendingTtl)));
         codeToToken.put(code, token);
-        return new Started(token, code);
+        return new Started(token, code, pendingTtl.getSeconds());
     }
 
     private String generateCode() {
