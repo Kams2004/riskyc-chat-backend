@@ -24,16 +24,17 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * WhatsApp-Web-style QR device linking: a web client that has no session
- * yet starts a pairing and renders the token as a QR code (see
- * PairingService for the in-memory store backing this), then polls status
- * until an already-signed-in app scans it and approves — which is what
- * actually mints the new web session here, exactly like a normal OTP
- * login's session-creation (AuthController#verifyOtp) except there's no
- * OTP step, since the approving caller's own valid JWT already proves who's
- * approving. Subject to the same shared device cap as a normal login, and
- * a paired-in session is never master (the approver, by definition already
- * signed in, always has at least one other active session already).
+ * WhatsApp-Web-style device linking: a client with no session yet (a web
+ * browser, or a phone skipping the OTP SMS) starts a pairing and renders the
+ * token as a QR code plus a short hand-typeable code (see PairingService for
+ * the in-memory store backing both), then polls status until an
+ * already-signed-in device scans or types it in and approves — which is what
+ * actually mints the new session here, exactly like a normal OTP login's
+ * session-creation (AuthController#verifyOtp) except there's no OTP step,
+ * since the approving caller's own valid JWT already proves who's approving.
+ * Subject to the same shared device cap as a normal login, and a paired-in
+ * session is never master (the approver, by definition already signed in,
+ * always has at least one other active session already).
  */
 @RestController
 @RequestMapping("/api/auth/pairing")
@@ -55,17 +56,19 @@ public class PairingController {
         this.maxLinkedDevices = maxLinkedDevices;
     }
 
-    public record StartRequest(String deviceLabel) {
+    public record StartRequest(String deviceLabel, String platform) {
     }
 
-    public record StartResponse(String token) {
+    public record StartResponse(String token, String code) {
     }
 
-    /** No auth required — this is what an anonymous, not-yet-signed-in web client calls to get a QR code in the first place. deviceLabel is client-supplied/display-only, same trust level as OtpVerifyRequest's own (see AuthController's doc comment on that field). */
+    /** No auth required — this is what an anonymous, not-yet-signed-in client calls to get a QR code (and its short manual-entry fallback) in the first place. deviceLabel/platform are client-supplied/display-only, same trust level as OtpVerifyRequest's own (see AuthController's doc comment on that field). */
     @PostMapping("/start")
     public StartResponse start(@RequestBody StartRequest request) {
         String label = request.deviceLabel() != null && !request.deviceLabel().isBlank() ? request.deviceLabel() : "Web browser";
-        return new StartResponse(pairingService.start(label));
+        String platform = request.platform() != null && !request.platform().isBlank() ? request.platform() : "web";
+        PairingService.Started started = pairingService.start(label, platform);
+        return new StartResponse(started.token(), started.code());
     }
 
     public record StatusResponse(String status, PairingService.ApprovedResult session) {
@@ -84,14 +87,27 @@ public class PairingController {
     public record InfoResponse(String deviceLabel) {
     }
 
-    /** What the mobile scanner shows before committing — "Link '<deviceLabel>'?" — fetched right after scanning, before calling approve. */
+    /** What the approving device shows before committing — "Link '<deviceLabel>'?" — fetched right after scanning/typing the code in, before calling approve. */
     @GetMapping("/{token}")
     public InfoResponse info(@PathVariable String token) {
         PairingService.Entry entry = pairingService.get(token);
         if (entry == null || entry.status() != PairingService.Status.PENDING) {
-            throw new ResponseStatusException(HttpStatus.GONE, "This QR code has expired — please refresh it and scan again");
+            throw new ResponseStatusException(HttpStatus.GONE, "This code has expired — please refresh it and try again");
         }
         return new InfoResponse(entry.deviceLabel());
+    }
+
+    public record ResolveCodeResponse(String token) {
+    }
+
+    /** The manual-entry fallback for when scanning the QR isn't possible — resolves the short, hand-typed code back to its token, then the caller proceeds through the exact same info/approve/deny endpoints above. No auth required, same trust level as every other lookup here. */
+    @GetMapping("/by-code/{code}")
+    public ResolveCodeResponse byCode(@PathVariable String code) {
+        String token = pairingService.resolveCode(code.trim().toUpperCase());
+        if (token == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "This code has expired or doesn't exist — please double-check it and try again");
+        }
+        return new ResolveCodeResponse(token);
     }
 
     @PostMapping("/{token}/approve")
@@ -100,7 +116,7 @@ public class PairingController {
         UUID userId = callerIdFrom(authorization);
         PairingService.Entry entry = pairingService.get(token);
         if (entry == null) {
-            throw new ResponseStatusException(HttpStatus.GONE, "This QR code has expired — please refresh it and scan again");
+            throw new ResponseStatusException(HttpStatus.GONE, "This code has expired — please refresh it and try again");
         }
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No such user"));
@@ -121,12 +137,12 @@ public class PairingController {
         // rather than leaving an orphaned Session no pairing ever handed
         // out.
         if (!pairingService.approve(token, result)) {
-            throw new ResponseStatusException(HttpStatus.GONE, "This QR code has already been used or expired");
+            throw new ResponseStatusException(HttpStatus.GONE, "This code has already been used or expired");
         }
         // isMaster is always false here: approving a pairing requires an
         // already-valid caller session, so this is by construction never
         // the account's first session.
-        sessionRepository.save(new Session(jti, user.getId(), entry.deviceLabel(), Instant.now(), "web", false));
+        sessionRepository.save(new Session(jti, user.getId(), entry.deviceLabel(), Instant.now(), entry.platform(), false));
         return ResponseEntity.ok().build();
     }
 
