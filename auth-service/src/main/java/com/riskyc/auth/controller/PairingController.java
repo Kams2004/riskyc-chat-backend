@@ -27,14 +27,17 @@ import java.util.UUID;
  * WhatsApp-Web-style device linking: a client with no session yet (a web
  * browser, or a phone skipping the OTP SMS) starts a pairing and renders the
  * token as a QR code plus a short hand-typeable code (see PairingService for
- * the in-memory store backing both), then polls status until an
- * already-signed-in device scans or types it in and approves — which is what
- * actually mints the new session here, exactly like a normal OTP login's
+ * the in-memory store backing both), then polls status until the account's
+ * MASTER device scans or types it in and approves — which is what actually
+ * mints the new session here, exactly like a normal OTP login's
  * session-creation (AuthController#verifyOtp) except there's no OTP step,
  * since the approving caller's own valid JWT already proves who's approving.
- * Subject to the same shared device cap as a normal login, and a paired-in
- * session is never master (the approver, by definition already signed in,
- * always has at least one other active session already).
+ * Only the master may approve (see Session#isMaster's own doc comment on
+ * why it alone is trusted to add/remove devices) — any other already-valid
+ * session fails with MasterOnlyError. Subject to the same shared device cap
+ * as a normal login, and a paired-in session is never master (the master
+ * that approved it is still around, so this is by construction never the
+ * account's first session).
  */
 @RestController
 @RequestMapping("/api/auth/pairing")
@@ -48,7 +51,7 @@ public class PairingController {
 
     public PairingController(PairingService pairingService, SessionRepository sessionRepository,
                               UserRepository userRepository, JwtIssuer jwtIssuer,
-                              @Value("${riskyc.devices.max-linked:5}") int maxLinkedDevices) {
+                              @Value("${riskyc.devices.max-linked:20}") int maxLinkedDevices) {
         this.pairingService = pairingService;
         this.sessionRepository = sessionRepository;
         this.userRepository = userRepository;
@@ -111,10 +114,22 @@ public class PairingController {
         return new ResolveCodeResponse(token);
     }
 
+    /** Same shape as AuthController's own DeviceLimitError — lets the approving device show the exact "you've reached N linked devices" message instead of a generic failure, same as the OTP-login path already does. */
+    public record DeviceLimitError(String reason, int maxLinkedDevices) {
+    }
+
+    /** Only the master device may vouch for a new one — a non-master's otherwise-valid session fails this with a clear reason rather than a generic error, same pattern as DeviceLimitError above. */
+    public record MasterOnlyError(String reason) {
+    }
+
     @PostMapping("/{token}/approve")
-    public ResponseEntity<Void> approve(@PathVariable String token,
-                                         @RequestHeader(value = "Authorization", required = false) String authorization) {
-        UUID userId = callerIdFrom(authorization);
+    public ResponseEntity<?> approve(@PathVariable String token,
+                                      @RequestHeader(value = "Authorization", required = false) String authorization) {
+        Session callerSession = callerSessionFrom(authorization);
+        if (!callerSession.isMaster()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new MasterOnlyError("MASTER_ONLY"));
+        }
+        UUID userId = callerSession.getUserId();
         PairingService.Entry entry = pairingService.get(token);
         if (entry == null) {
             throw new ResponseStatusException(HttpStatus.GONE, "This code has expired — please refresh it and try again");
@@ -124,7 +139,7 @@ public class PairingController {
 
         List<Session> activeSessions = sessionRepository.findByUserIdAndRevokedFalseOrderByLastSeenAtDesc(user.getId());
         if (activeSessions.size() >= maxLinkedDevices) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Device limit reached — remove a linked device first");
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new DeviceLimitError("DEVICE_LIMIT_REACHED", maxLinkedDevices));
         }
 
         String jti = UUID.randomUUID().toString();
@@ -156,16 +171,22 @@ public class PairingController {
     }
 
     private UUID callerIdFrom(String authorization) {
+        return callerSessionFrom(authorization).getUserId();
+    }
+
+    /** Like callerIdFrom, but returns the caller's own Session row — approve() needs isMaster() off of it, not just the user id. */
+    private Session callerSessionFrom(String authorization) {
         if (authorization == null || !authorization.startsWith("Bearer ")) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Missing bearer token");
         }
         try {
             JwtIssuer.JwtClaims claims = jwtIssuer.verifyAndGetClaims(authorization.substring("Bearer ".length()));
-            boolean revoked = sessionRepository.findByJti(claims.jti()).map(Session::isRevoked).orElse(false);
-            if (revoked) {
+            Session callerSession = sessionRepository.findByJti(claims.jti())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid token"));
+            if (callerSession.isRevoked()) {
                 throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Session has been signed out");
             }
-            return UUID.fromString(claims.subject());
+            return callerSession;
         } catch (ResponseStatusException e) {
             throw e;
         } catch (RuntimeException e) {

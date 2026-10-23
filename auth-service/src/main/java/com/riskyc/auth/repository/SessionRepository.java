@@ -16,6 +16,9 @@ public interface SessionRepository extends JpaRepository<Session, UUID> {
     /** Polled by messaging-service's RevokedJtiCache — only jtis revoked since the last poll need to be (re-)learned. */
     List<Session> findByRevokedTrueAndRevokedAtAfter(Instant since);
 
+    /** "Recently signed out" section of the logged-in-devices screen (SessionController#list) — time-bounded so this can't grow unbounded for a long-lived account. */
+    List<Session> findByUserIdAndRevokedTrueAndRevokedAtAfterOrderByRevokedAtDesc(UUID userId, Instant since);
+
     /**
      * True iff this user currently has at least one non-revoked session —
      * false is exactly the condition under which the NEXT session created

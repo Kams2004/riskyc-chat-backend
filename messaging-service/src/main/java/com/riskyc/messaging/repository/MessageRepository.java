@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -76,6 +77,15 @@ public interface MessageRepository extends JpaRepository<Message, String> {
 
     @Query("SELECT MAX(m.sentAt) FROM Message m WHERE m.groupId = :groupId")
     Instant findLastMessageAtForGroup(@Param("groupId") String groupId);
+
+    interface GroupLastMessageRow {
+        String getGroupId();
+        Instant getLastMessageAt();
+    }
+
+    /** Batched counterpart to findLastMessageAtForGroup — ConversationController#list used to call the single-group version once per group the caller belongs to (N+1), worsened by every linked device independently re-running this expensive endpoint on its own socket reconnect. */
+    @Query("SELECT m.groupId AS groupId, MAX(m.sentAt) AS lastMessageAt FROM Message m WHERE m.groupId IN :groupIds GROUP BY m.groupId")
+    List<GroupLastMessageRow> findLastMessageAtForGroups(@Param("groupIds") Collection<String> groupIds);
 
     /** Feeds DisappearingMessageCleanupJob's periodic hard-delete sweep. History reads already filter these out themselves in the meantime — see MessageHistoryController#history. */
     @Modifying

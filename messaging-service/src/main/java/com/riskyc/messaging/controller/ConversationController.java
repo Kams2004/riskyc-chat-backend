@@ -78,24 +78,46 @@ public class ConversationController {
         String userId = callerIdFrom(authorization);
         List<ConversationSummary> summaries = new ArrayList<>();
 
+        List<MessageRepository.OneToOneSummaryRow> oneToOneRows = messageRepository.findOneToOneSummariesForUser(userId);
+        List<GroupMember> memberships = groupMemberRepository.findByUserId(userId);
+
+        // Scoped to just this caller's own conversation/group ids — the old
+        // findAll() here loaded every disappearing-message setting row in
+        // the whole system on every single list() call, growing with total
+        // platform data regardless of who was asking.
+        Set<String> relevantIds = new HashSet<>();
+        for (MessageRepository.OneToOneSummaryRow row : oneToOneRows) relevantIds.add(row.getConversationId());
+        for (GroupMember member : memberships) relevantIds.add(member.getGroupId());
         Map<String, DisappearingMessageSettings> disappearingById = new HashMap<>();
-        for (DisappearingMessageSettings s : disappearingMessageSettingsRepository.findAll()) {
+        for (DisappearingMessageSettings s : disappearingMessageSettingsRepository.findByConversationIdIn(relevantIds)) {
             disappearingById.put(s.getConversationId(), s);
         }
+
         Set<String> mutedIds = new HashSet<>();
         for (MutedConversation m : mutedConversationRepository.findByUserId(userId)) {
             mutedIds.add(m.getConversationId());
         }
 
-        for (MessageRepository.OneToOneSummaryRow row : messageRepository.findOneToOneSummariesForUser(userId)) {
+        for (MessageRepository.OneToOneSummaryRow row : oneToOneRows) {
             DisappearingMessageSettings s = disappearingById.get(row.getConversationId());
             summaries.add(new ConversationSummary(row.getConversationId(), row.getOtherUserId(), null,
                     row.getLastMessageAt().toString(), mutedIds.contains(row.getConversationId()),
                     s != null ? s.getDurationSeconds() : null));
         }
 
-        for (GroupMember member : groupMemberRepository.findByUserId(userId)) {
-            Instant lastMessageAt = messageRepository.findLastMessageAtForGroup(member.getGroupId());
+        // One batched query instead of one findLastMessageAtForGroup call
+        // per group (N+1) — this endpoint runs on every socket (re)connect,
+        // and a linked second device means every group member's own
+        // connection count (and therefore how often this ran) doubled.
+        List<String> groupIds = memberships.stream().map(GroupMember::getGroupId).toList();
+        Map<String, Instant> lastMessageByGroup = new HashMap<>();
+        if (!groupIds.isEmpty()) {
+            for (MessageRepository.GroupLastMessageRow row : messageRepository.findLastMessageAtForGroups(groupIds)) {
+                lastMessageByGroup.put(row.getGroupId(), row.getLastMessageAt());
+            }
+        }
+        for (GroupMember member : memberships) {
+            Instant lastMessageAt = lastMessageByGroup.get(member.getGroupId());
             DisappearingMessageSettings s = disappearingById.get(member.getGroupId());
             summaries.add(new ConversationSummary(member.getGroupId(), null, member.getGroupId(),
                     (lastMessageAt != null ? lastMessageAt : member.getJoinedAt()).toString(),

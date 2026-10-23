@@ -14,7 +14,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -38,7 +40,7 @@ public class SessionController {
 
     public SessionController(SessionRepository sessionRepository, SessionService sessionService, JwtIssuer jwtIssuer,
                               @Value("${riskyc.internal.api-key:}") String internalApiKey,
-                              @Value("${riskyc.devices.max-linked:5}") int maxLinkedDevices) {
+                              @Value("${riskyc.devices.max-linked:20}") int maxLinkedDevices) {
         this.sessionRepository = sessionRepository;
         this.sessionService = sessionService;
         this.jwtIssuer = jwtIssuer;
@@ -46,17 +48,31 @@ public class SessionController {
         this.maxLinkedDevices = maxLinkedDevices;
     }
 
-    public record SessionResult(String id, String deviceLabel, String createdAt, String lastSeenAt, boolean isCurrent, boolean isMaster) {
+    /** revoked/revokedAt are null-ish (false/null) for every currently-active session — only populated for an entry in the "recently signed out" window below, so the devices screen can show what happened to a device instead of it just silently vanishing. */
+    public record SessionResult(String id, String deviceLabel, String createdAt, String lastSeenAt, boolean isCurrent,
+                                 boolean isMaster, boolean revoked, String revokedAt) {
     }
+
+    // How far back a signed-out device still shows up in the "recently
+    // signed out" list before it's gone for good — bounds the query instead
+    // of accumulating every revocation an account has ever had.
+    private static final Duration REVOKED_HISTORY_WINDOW = Duration.ofDays(30);
 
     @GetMapping("/api/sessions")
     public List<SessionResult> list(@RequestHeader(value = "Authorization", required = false) String authorization) {
         JwtIssuer.JwtClaims claims = claimsFrom(authorization);
         UUID userId = UUID.fromString(claims.subject());
-        return sessionRepository.findByUserIdAndRevokedFalseOrderByLastSeenAtDesc(userId).stream()
-                .map(s -> new SessionResult(s.getId().toString(), s.getDeviceLabel(), s.getCreatedAt().toString(),
-                        s.getLastSeenAt().toString(), s.getJti().equals(claims.jti()), s.isMaster()))
-                .toList();
+        List<SessionResult> results = new ArrayList<>();
+        for (Session s : sessionRepository.findByUserIdAndRevokedFalseOrderByLastSeenAtDesc(userId)) {
+            results.add(new SessionResult(s.getId().toString(), s.getDeviceLabel(), s.getCreatedAt().toString(),
+                    s.getLastSeenAt().toString(), s.getJti().equals(claims.jti()), s.isMaster(), false, null));
+        }
+        for (Session s : sessionRepository.findByUserIdAndRevokedTrueAndRevokedAtAfterOrderByRevokedAtDesc(
+                userId, Instant.now().minus(REVOKED_HISTORY_WINDOW))) {
+            results.add(new SessionResult(s.getId().toString(), s.getDeviceLabel(), s.getCreatedAt().toString(),
+                    s.getLastSeenAt().toString(), false, s.isMaster(), true, s.getRevokedAt().toString()));
+        }
+        return results;
     }
 
     public record DeviceLimitResponse(int maxLinkedDevices) {

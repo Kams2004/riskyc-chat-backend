@@ -210,6 +210,17 @@ public class ChatController {
                 pushNotificationService.sendToUser(inbound.recipientId(), pushTitle, previewBody, "messages-v3", pushData);
             }
         }
+
+        // Fan this same envelope back to the SENDER's own other sessions too
+        // — convertAndSendToUser reaches every active session of a user id,
+        // so a linked second device otherwise never learns this message was
+        // sent at all until it happens to reopen this exact conversation.
+        // No push notification: the sender obviously doesn't need to be
+        // notified of their own message. The client applies a
+        // senderId === own-userId carve-out so the device that actually
+        // sent it (already updated optimistically/locally) doesn't
+        // double-handle this echo.
+        messagingTemplate.convertAndSendToUser(inbound.senderId(), "/queue/messages", outbound);
     }
 
     /**

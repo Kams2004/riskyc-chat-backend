@@ -94,7 +94,7 @@ services:
       RISKYC_OTP_SMS_MAX_TRIALS: ${RISKYC_OTP_SMS_MAX_TRIALS:-2}
       # Max devices (any mix of phones/tablets/web) one account may have
       # linked at once — see AuthController#verifyOtp.
-      RISKYC_MAX_LINKED_DEVICES: ${RISKYC_MAX_LINKED_DEVICES:-5}
+      RISKYC_MAX_LINKED_DEVICES: ${RISKYC_MAX_LINKED_DEVICES:-20}
     depends_on:
       - postgres
 

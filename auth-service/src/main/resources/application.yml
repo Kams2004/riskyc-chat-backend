@@ -46,7 +46,7 @@ riskyc:
     # one pool) per account — see AuthController#verifyOtp and
     # PairingController#approve. The master device must remove one
     # (SessionController#revoke) before another can link past this cap.
-    max-linked: ${RISKYC_MAX_LINKED_DEVICES:5}
+    max-linked: ${RISKYC_MAX_LINKED_DEVICES:20}
   pairing:
     # How long a QR/manual-code device-pairing stays valid before the client
     # must request a fresh one (PairingService/PairingController) — admin-

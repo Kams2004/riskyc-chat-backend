@@ -53,7 +53,7 @@ public class AuthController {
     public AuthController(OtpService otpService, OtpRateLimiter rateLimiter, UserRepository userRepository,
                            SessionRepository sessionRepository, JwtIssuer jwtIssuer, EmailOtpSender emailOtpSender,
                            SmsOtpSender smsOtpSender, SystemAccountService systemAccountService,
-                           @Value("${riskyc.devices.max-linked:5}") int maxLinkedDevices) {
+                           @Value("${riskyc.devices.max-linked:20}") int maxLinkedDevices) {
         this.otpService = otpService;
         this.rateLimiter = rateLimiter;
         this.userRepository = userRepository;
