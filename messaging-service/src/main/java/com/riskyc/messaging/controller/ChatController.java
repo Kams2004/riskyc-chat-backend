@@ -308,6 +308,27 @@ public class ChatController {
     }
 
     /**
+     * Private, own-devices-only counterpart to /chat.ack, used when a user has
+     * "Send read receipts" turned off: /chat.ack above is skipped entirely in
+     * that case (so the other party never learns the message was read), which
+     * also meant this account's OWN other linked devices never found out
+     * either — their local unread badge for that conversation stayed stuck.
+     * This mirrors the exact same payload straight to the caller's own
+     * /queue/read-state, same destination /chat.ack already mirrors to,
+     * WITHOUT touching Message.status/MessageReceipt or the per-conversation
+     * .status topic, so it's invisible to everyone except this user's own
+     * sessions. Works for both 1:1 and group conversationIds/messageIds —
+     * this never persists anything, so there's nothing group-specific to do.
+     */
+    @MessageMapping("/chat.sync-read")
+    public void syncRead(MessageStatusUpdate update, Principal principal) {
+        if (principal == null) {
+            return;
+        }
+        messagingTemplate.convertAndSendToUser(principal.getName(), "/queue/read-state", update);
+    }
+
+    /**
      * Group counterpart to /chat.ack — kept as a separate endpoint so the
      * existing 1:1 ack path above is untouched. Each member acks their OWN
      * receipt (from the STOMP Principal, not a client-supplied id), so one
