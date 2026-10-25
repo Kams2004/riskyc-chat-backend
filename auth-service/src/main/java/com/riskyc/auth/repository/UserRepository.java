@@ -26,26 +26,19 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     List<User> findByEmailIn(Collection<String> emails);
 
-    @Query("""
-            SELECT u FROM User u
-            WHERE u.id <> :excludeId
-              AND (
-                :query = '' OR
-                LOWER(u.displayName) LIKE LOWER(CONCAT('%', :query, '%')) OR
-                LOWER(u.email) LIKE LOWER(CONCAT('%', :query, '%')) OR
-                LOWER(u.phoneNumber) LIKE LOWER(CONCAT('%', :query, '%'))
-              )
-            ORDER BY u.displayName ASC NULLS LAST, u.createdAt DESC
-            """)
-    List<User> search(@Param("excludeId") UUID excludeId, @Param("query") String query);
-
     /**
-     * Admin-service's user list — unlike search() above, includes every
-     * account (no excludeId) and is paginated. Also matches by exact id
+     * Admin-service's user list — paginated, matches by exact id too
      * (string-compared, not cast — Postgres' UUID cast throws instead of
      * just not-matching on a non-UUID query string, which would turn every
      * plain-text search into a 500) so Reports/Blocked pages can deep-link
      * straight to an account by id, not just by name/email/phone.
+     *
+     * There is deliberately no regular-user equivalent: a signed-in client
+     * can only ever find someone else by their exact phone number
+     * (UserController#lookupByPhone) or already-matched device contacts
+     * (match-contacts above) — never by browsing/searching the whole user
+     * base by partial name, same privacy model as WhatsApp. A prior GET
+     * /api/users?q= did exactly that and was removed outright.
      */
     @Query("""
             SELECT u FROM User u

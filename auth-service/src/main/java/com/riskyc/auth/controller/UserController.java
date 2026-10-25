@@ -139,15 +139,6 @@ public class UserController {
         return matched.values().stream().map(this::toResult).toList();
     }
 
-    @GetMapping("/api/users")
-    public List<UserResult> search(@RequestHeader(value = "Authorization", required = false) String authorization,
-                                    @RequestParam(name = "q", defaultValue = "") String query) {
-        UUID callerId = callerIdFrom(authorization);
-        return userRepository.search(callerId, query.trim()).stream()
-                .map(this::toResult)
-                .toList();
-    }
-
     @GetMapping("/api/users/{userId}")
     public UserResult get(@RequestHeader(value = "Authorization", required = false) String authorization,
                            @PathVariable UUID userId) {
