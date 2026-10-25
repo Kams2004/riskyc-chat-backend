@@ -92,4 +92,38 @@ public interface MessageRepository extends JpaRepository<Message, String> {
     @Transactional
     @Query("DELETE FROM Message m WHERE m.expiresAt IS NOT NULL AND m.expiresAt < :now")
     int deleteExpired(@Param("now") Instant now);
+
+    /** All N per-recipient copies of one broadcast — see SystemAccountController#cancelBroadcast. senderId scopes this to the caller's own broadcasts, same as every other system-account endpoint's own-account check. */
+    List<Message> findByBroadcastIdAndSenderId(String broadcastId, String senderId);
+
+    interface BroadcastSummaryRow {
+        String getBroadcastId();
+        String getCiphertext();
+        String getMediaType();
+        Instant getSentAt();
+        Long getRecipientCount();
+    }
+
+    /**
+     * One row per past broadcast this account sent, newest first — ciphertext/
+     * mediaType are identical across every copy of a given broadcastId (see
+     * SystemAccountController#sendBroadcastMessage), so MIN() here is just
+     * "any one copy's value", not a real aggregation; deleted = false so a
+     * cancelled broadcast (see #cancelBroadcast) drops off this list once
+     * every copy is gone.
+     */
+    @Query(value = """
+            SELECT
+              m.broadcast_id AS broadcastId,
+              MIN(m.ciphertext) AS ciphertext,
+              MIN(m.media_type) AS mediaType,
+              MAX(m.sent_at) AS sentAt,
+              COUNT(*) AS recipientCount
+            FROM message m
+            WHERE m.sender_id = :senderId AND m.broadcast_id IS NOT NULL AND m.deleted = false
+            GROUP BY m.broadcast_id
+            ORDER BY MAX(m.sent_at) DESC
+            LIMIT 50
+            """, nativeQuery = true)
+    List<BroadcastSummaryRow> findRecentBroadcasts(@Param("senderId") String senderId);
 }

@@ -134,6 +134,15 @@ public class Message {
     @Column(name = "group_id")
     private String groupId;
 
+    // Null for every ordinary message. Set to the same value on every one of
+    // the N per-recipient copies a single system-account broadcast fans out
+    // (see SystemAccountController#broadcast) — the only thing letting the
+    // official account later identify and cancel all N copies as one unit,
+    // since each copy otherwise has its own independent messageId/
+    // conversationId and no other shared key.
+    @Column(name = "broadcast_id")
+    private String broadcastId;
+
     // All four null for a message that isn't a reply. Generated client-side
     // at send time from the sender's own locally-rendered content, not
     // re-derived server-side — this is what lets "reply privately" work:
@@ -361,6 +370,14 @@ public class Message {
 
     public void setGroupId(String groupId) {
         this.groupId = groupId;
+    }
+
+    public String getBroadcastId() {
+        return broadcastId;
+    }
+
+    public void setBroadcastId(String broadcastId) {
+        this.broadcastId = broadcastId;
     }
 
     public String getReplyToMessageId() {

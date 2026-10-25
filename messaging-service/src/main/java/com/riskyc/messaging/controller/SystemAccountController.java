@@ -2,6 +2,7 @@ package com.riskyc.messaging.controller;
 
 import com.riskyc.common.dto.MessageEnvelope;
 import com.riskyc.common.security.JwtIssuer;
+import com.riskyc.messaging.dto.MessageMutation;
 import com.riskyc.messaging.dto.SystemWelcomeRequest;
 import com.riskyc.messaging.entity.Message;
 import com.riskyc.messaging.repository.MessageRepository;
@@ -13,6 +14,9 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -103,6 +107,9 @@ public class SystemAccountController {
                                     Integer mediaDurationMs, String senderDisplayName, String senderAvatarObjectKey) {
     }
 
+    public record BroadcastResult(String broadcastId, int recipientCount) {
+    }
+
     /**
      * Client-facing — a real signed-in user's JWT, not the internal key.
      * Only the official account itself may call this (checked against
@@ -122,21 +129,74 @@ public class SystemAccountController {
      * server-side currently blocks that.
      */
     @PostMapping("/api/system-account/broadcast")
-    public void broadcast(@RequestHeader(value = "Authorization", required = false) String authorization,
-                           @RequestBody BroadcastRequest request) {
+    public BroadcastResult broadcast(@RequestHeader(value = "Authorization", required = false) String authorization,
+                                      @RequestBody BroadcastRequest request) {
         String callerId = callerIdFrom(authorization);
         String systemAccountId = fetchSystemAccountId();
         if (systemAccountId == null || !systemAccountId.equals(callerId)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only the official account can broadcast");
         }
 
+        String broadcastId = UUID.randomUUID().toString();
         List<String> allUserIds = fetchAllUserIds();
+        int sent = 0;
         for (String recipientId : allUserIds) {
             if (recipientId.equals(callerId)) {
                 continue;
             }
-            sendBroadcastMessage(callerId, request.senderDisplayName(), request.senderAvatarObjectKey(), recipientId, request);
+            sendBroadcastMessage(callerId, request.senderDisplayName(), request.senderAvatarObjectKey(), recipientId, request, broadcastId);
+            sent++;
         }
+        return new BroadcastResult(broadcastId, sent);
+    }
+
+    public record BroadcastSummary(String broadcastId, String preview, String mediaType, Instant sentAt, long recipientCount) {
+    }
+
+    /** Lets the official account see what it's sent recently so it has something to pick from when cancelling one — see #cancelBroadcast. */
+    @GetMapping("/api/system-account/broadcasts")
+    public List<BroadcastSummary> recentBroadcasts(@RequestHeader(value = "Authorization", required = false) String authorization) {
+        String callerId = requireSystemAccountCaller(authorization);
+        return messageRepository.findRecentBroadcasts(callerId).stream()
+                .map(row -> new BroadcastSummary(row.getBroadcastId(), row.getCiphertext(), row.getMediaType(), row.getSentAt(), row.getRecipientCount()))
+                .toList();
+    }
+
+    /**
+     * "Delete for everyone", but for an entire broadcast at once instead of
+     * one message at a time — every one of the N per-recipient copies this
+     * broadcastId was given at send time (see #sendBroadcastMessage) gets the
+     * exact same treatment ChatController#delete's EVERYONE scope gives a
+     * single message: flagged deleted, ciphertext/media cleared, and a
+     * mutation pushed both to whoever has that specific thread open
+     * (the .mutations topic) and to each recipient's own inbox queue (so the
+     * chat list's preview updates even if that thread isn't open) — inlined
+     * here rather than reused from ChatController since that method is
+     * private and scoped to a single message.
+     */
+    @DeleteMapping("/api/system-account/broadcast/{broadcastId}")
+    public BroadcastResult cancelBroadcast(@RequestHeader(value = "Authorization", required = false) String authorization,
+                                            @PathVariable String broadcastId) {
+        String callerId = requireSystemAccountCaller(authorization);
+        List<Message> copies = messageRepository.findByBroadcastIdAndSenderId(broadcastId, callerId);
+        for (Message message : copies) {
+            message.setDeleted(true);
+            message.setCiphertext("");
+            messageRepository.save(message);
+            MessageMutation mutation = new MessageMutation(message.getConversationId(), message.getMessageId(), null, false, true, message.isPinned(), null);
+            messagingTemplate.convertAndSend("/topic/conversation." + message.getConversationId() + ".mutations", mutation);
+            messagingTemplate.convertAndSendToUser(message.getRecipientId(), "/queue/mutations", mutation);
+        }
+        return new BroadcastResult(broadcastId, copies.size());
+    }
+
+    private String requireSystemAccountCaller(String authorization) {
+        String callerId = callerIdFrom(authorization);
+        String systemAccountId = fetchSystemAccountId();
+        if (systemAccountId == null || !systemAccountId.equals(callerId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only the official account can do this");
+        }
+        return callerId;
     }
 
     /**
@@ -147,13 +207,14 @@ public class SystemAccountController {
      * normal ChatController#send.
      */
     private void sendBroadcastMessage(String senderId, String senderDisplayName, String senderAvatarObjectKey,
-                                       String recipientId, BroadcastRequest request) {
+                                       String recipientId, BroadcastRequest request, String broadcastId) {
         String conversationId = List.of(senderId, recipientId).stream().sorted().reduce((a, b) -> a + "_" + b).orElseThrow();
         String messageId = UUID.randomUUID().toString();
         Instant sentAt = Instant.now();
 
         Message message = new Message(messageId, conversationId, senderId, recipientId,
                 request.text() != null ? request.text() : "", sentAt);
+        message.setBroadcastId(broadcastId);
         if (request.mediaType() != null) {
             message.setMediaType(Message.MediaType.valueOf(request.mediaType()));
             message.setMediaObjectKey(request.mediaObjectKey());
@@ -219,8 +280,9 @@ public class SystemAccountController {
                 ? List.of(request.recipientId())
                 : fetchAllUserIds().stream().filter(id -> !id.equals(senderId)).toList();
 
+        String broadcastId = UUID.randomUUID().toString();
         for (String recipientId : recipients) {
-            sendBroadcastMessage(senderId, senderDisplayName, senderAvatarObjectKey, recipientId, broadcastBody);
+            sendBroadcastMessage(senderId, senderDisplayName, senderAvatarObjectKey, recipientId, broadcastBody, broadcastId);
         }
         return new InternalBroadcastResult(recipients.size());
     }

@@ -12,6 +12,12 @@ import com.riskyc.messaging.entity.Call;
 import com.riskyc.messaging.repository.CallRepository;
 import com.riskyc.messaging.service.CallLogService;
 import com.riskyc.messaging.service.PushNotificationService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -20,8 +26,11 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.net.URI;
 import java.security.Principal;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -42,22 +51,56 @@ import java.util.UUID;
 @Controller
 public class CallController {
 
+    private static final Logger log = LoggerFactory.getLogger(CallController.class);
+
     private final CallRepository callRepository;
     private final SimpMessagingTemplate messagingTemplate;
     private final PushNotificationService pushNotificationService;
     private final JwtIssuer jwtIssuer;
     private final RevokedJtiCache revokedJtiCache;
     private final CallLogService callLogService;
+    private final String internalApiKey;
+    private final String authServiceInternalUrl;
+    private final RestTemplate restTemplate = new RestTemplate();
 
     public CallController(CallRepository callRepository,
                            SimpMessagingTemplate messagingTemplate, PushNotificationService pushNotificationService,
-                           JwtIssuer jwtIssuer, RevokedJtiCache revokedJtiCache, CallLogService callLogService) {
+                           JwtIssuer jwtIssuer, RevokedJtiCache revokedJtiCache, CallLogService callLogService,
+                           @Value("${riskyc.internal.api-key:}") String internalApiKey,
+                           @Value("${riskyc.auth-service.internal-url}") String authServiceInternalUrl) {
         this.callRepository = callRepository;
         this.messagingTemplate = messagingTemplate;
         this.pushNotificationService = pushNotificationService;
         this.jwtIssuer = jwtIssuer;
         this.revokedJtiCache = revokedJtiCache;
         this.callLogService = callLogService;
+        this.internalApiKey = internalApiKey;
+        this.authServiceInternalUrl = authServiceInternalUrl;
+    }
+
+    /**
+     * Same "another service calls auth-service's internal lookup" pattern as
+     * SystemAccountController#fetchSystemAccountId — duplicated rather than
+     * shared since neither controller has a common service layer to put it
+     * in today. The official account is read-only/broadcast-only (see
+     * SystemAccountController#broadcast's doc comment); nobody should be able
+     * to ring it. The mobile client already hides the call buttons for it —
+     * this is the server-side backstop for a client that skips that check.
+     */
+    private boolean isSystemAccount(String userId) {
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            if (!internalApiKey.isBlank()) {
+                headers.set("X-Internal-Api-Key", internalApiKey);
+            }
+            URI uri = URI.create(authServiceInternalUrl + "/internal/system-account/id");
+            var response = restTemplate.exchange(uri, HttpMethod.GET, new HttpEntity<Void>(headers), Map.class);
+            Object systemAccountId = response.getBody() != null ? response.getBody().get("userId") : null;
+            return systemAccountId != null && systemAccountId.toString().equals(userId);
+        } catch (RestClientException e) {
+            log.warn("Failed to resolve the official account's id while validating a call invite", e);
+            return false;
+        }
     }
 
     @MessageMapping("/call.invite")
@@ -66,6 +109,10 @@ public class CallController {
             return;
         }
         String fromUserId = principal.getName();
+        if (isSystemAccount(inbound.toUserId())) {
+            log.warn("Dropped call invite from {} to the official account {}", fromUserId, inbound.toUserId());
+            return;
+        }
         String callId = inbound.callId() != null ? inbound.callId() : UUID.randomUUID().toString();
         Call call = new Call(callId, fromUserId, inbound.toUserId(), Call.CallType.valueOf(inbound.type()), Instant.now());
         // Persisted so a notification tap can fetch a fresh offer via GET
